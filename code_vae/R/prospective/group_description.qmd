@@ -1,0 +1,788 @@
+---
+title: "Analyse des groupes"
+format:
+  html:
+    code-fold: true
+    embed-resources: true
+    fig-dpi: 300
+execute:
+  message: false
+  warning: false
+editor: source
+---
+
+## Objectif du document
+
+Le but est de décrire les groupes de bateaux obtenus par colSBM (cf. papier JRSS C),
+en terme de zones de pêche, ciblage d'espèce, caractéristique des bateaux...
+
+
+```{r import}
+
+#|>echo: False
+
+library(tidyverse)
+library(lubridate)
+df_cvae_group <- read_csv(file = "../Rdata/xgv_cvae_group.csv")
+df_sacrois_xgv_capt <- read_csv("../Rdata/sacrois_xgv_capt_complet.csv")
+df_traj <- lapply(
+  c("2014", "2015", "2016", "2017", "2018"),
+  function(year) {
+    df_tmp <-  read_delim(paste0("../data/Geoloc/SIH-GEOLOC-positions-macco-", year, ".csv"),
+                          delim = ";",
+                          col_types = cols(
+                            ID = col_skip(), #col_integer(),
+                            NAVIRE = col_integer(),
+                            PAVILLON = col_skip(),#col_factor(),
+                            DATE_HEURE = col_datetime("%d/%m/%Y %H:%M:%S"),
+                            LONGITUDE = col_double(),
+                            LATITUDE = col_double(),
+                            VITESSE_MOYENNE = col_skip(), #col_double(),
+                            VITESSE_INSTANTANEE = col_skip(), #col_double(),
+                            DIRECTION = col_double(),
+                            EN_PECHE = col_logical(),
+                            ENGF_COD_PRINC = col_skip(), #col_factor(),
+                            ENGF_LIB_PRINC = col_skip(), #col_character(),
+                            S_FLOTTILLE_IFREMER_COD = col_skip(), #col_factor(),
+                            S_FLOTTILLE_IFREMER_LIB = col_skip(), #col_character(),
+                            TAILLE = col_double(),
+                            PUISSANCE = col_double(),
+                            MAREE_ID = col_integer()
+                          ))
+    df_tmp |> 
+      filter(MAREE_ID %in% df_cvae_group$maree, 
+             EN_PECHE == TRUE) |> 
+      select(-EN_PECHE) 
+  }
+)
+```
+
+
+```{r}
+
+#|>echo: False
+
+df_traj_group <- bind_rows(df_traj) |> rename(maree=MAREE_ID) |> 
+  left_join(df_cvae_group) |> 
+  select(navire, maree, LONGITUDE, LATITUDE, TAILLE, PUISSANCE, time, Group)
+```
+
+
+## Zones de pêche
+
+Les zones de pêche des groupes ne se  recouvrent que partiellement. 
+
+- Le groupe A (1) couvre les zones au sud ouest du port (autour de $-4.7, 47.7$), au sud du port mais à bonne distance $(-4.4, 47.5)$, et de manière plus diffuse une bande au sud-est,
+- Le groupe B (2) couvre les même zone que le groupe A
+- Le groupe C (3) à une concentration plus forte dans les zones plus proches du port (autour de $-4.5$ de longitude) et une zone à l'ouest autour de ($-4.0, 47.75$),
+- Le groupe D (4) se concentre sur les zone proches et au sud du port,
+- Le groupe E (5) couvre les zones les plus à l'ouest et celle au nord-ouest du port.
+
+
+```{r}
+df_traj_group |> mutate(quarter = quarter(time)) |> 
+  #filter(quarter == 2) |> 
+  ggplot(aes(x = LONGITUDE, y = LATITUDE, fill = as_factor(Group))) +
+  annotation_map(map = fortify(maps::map("france", xlim = c(-5.3, -3.6), ylim = c(47, 48.3)))) +
+  stat_bin_2d(aes(alpha = after_stat(ndensity)), show.legend = FALSE) +
+#  geom_hex() +
+  coord_fixed() +
+  facet_grid(Group ~ quarter) +
+  theme_bw() +
+  ggtitle("Carte des zones de pêches par groupe et par trimestre")
+```
+
+## Caratéristiques des navires de pêche
+
+Les navires du groupes $D$ sont plus petits (median $14.5$ mètres) et moins puissant (median $\approx 200$) que ceux des autres groupes. À noter que bien que les groupes $A$ et $B$ couvrent les mêmes
+ zone de pêche, les navires le groupe $B$ est homogène en taille et en puissance ($15$ mètres et $250$),
+ alors que les bateaux les plus puissants sont dans le groupe $A$.
+
+```{r}
+df_traj_group |> mutate(quarter = quarter(time)) |>
+  mutate(year = year(time)) |> 
+  select(-LATITUDE, -LONGITUDE) |>
+  distinct() |> 
+  mutate(Group = as_factor(Group)) |> 
+  pivot_longer(cols = c(TAILLE, PUISSANCE)) |> 
+  ggplot(aes(y = value,  col = Group)) +
+  geom_boxplot() +
+  labs(x = NULL, y=NULL) +
+#  geom_point() +
+#  geom_errorbar(aes(ymin=numeric.mean-numeric.sd, ymax=numeric.mean+numeric.sd), width=.2,
+#                position=position_dodge(0.1)) +
+#  geom_line(linewidth = .1) +
+  facet_grid(name ~quarter, scales = "free_y") +
+  theme_bw() +
+  theme(axis.text.x = element_blank()) +
+  ggtitle("Caractéristiques des navires par groupe pondérés par le nombre de marée et par trimestre")
+```
+
+
+```{r}
+df_traj_group |> mutate(quarter = quarter(time)) |>
+  mutate(year = year(time)) |> 
+  select(-LATITUDE, -LONGITUDE) |>
+  distinct() |> 
+  mutate(Group = as_factor(Group)) |> 
+  group_by(Group, quarter, year) |> 
+  distinct(navire, TAILLE, PUISSANCE) |> 
+  pivot_longer(cols = c(TAILLE, PUISSANCE)) |> 
+  ggplot(aes(y = value,  col = Group)) +
+  geom_boxplot() +
+  labs(x = NULL, y = NULL) +
+  #  geom_point() +
+  #  geom_errorbar(aes(ymin=numeric.mean-numeric.sd, ymax=numeric.mean+numeric.sd), width=.2,
+  #                position=position_dodge(0.1)) +
+  #  geom_line(linewidth = .1) +
+  facet_grid(name ~quarter, scales = "free_y") +
+  theme_bw()+
+  theme(axis.text.x = element_blank()) +
+  ggtitle("Caractéristiques des navires (unique) par groupe et par trimestre")
+```
+
+
+
+## Ciblage des espèces
+
+Ici, on regarde l'importance économique de chaque espèce pour chaque groupe.
+La langoustine (NEP) représente la majeure partie de l'économie de la flottille, 
+en particulier en second trimestre (trimestre de référence WGBIE). Le groupe $E$ 
+se distingue. En particulier, la longoustine est très minoritaire au 
+trimestre $1$ et $4$. La sole est bien réparti entre les groupes en valeur relative. 
+On remarque une différence dans l'importance de la baudroie (HKE) et de la cardine (MNZ) 
+entre les groupes $D$, $E$ et $A$, $B$, $C$.
+
+
+
+```{r}
+df_sacrois_xgv_capt %>% 
+  filter(MONTANT_EUROS_MOYENNE < 8000) |> 
+#  mutate(MONTANT_EUROS_MOYENNE = pmin(MONTANT_EUROS_MOYENNE, 8000)) %>% 
+  rename(maree = MAREE_ID) %>% 
+  left_join(df_cvae_group) %>% 
+  mutate(year = year(time),
+         quarter = quarter(time)) |> 
+  mutate(ESP = case_match(ESP_COD_FAO,
+                                 "HKE" ~ ESP_COD_FAO,
+                                 "SOL" ~ ESP_COD_FAO,
+                                 "JOD" ~ ESP_COD_FAO,
+                                 "NEP" ~ ESP_COD_FAO,
+                                 "MNZ" ~ ESP_COD_FAO,
+                                 .default = "Others")) |> 
+  group_by(Group, quarter, ESP) |>
+  select(MONTANT_EUROS_MOYENNE) |> 
+  mutate(TOTAL = sum(MONTANT_EUROS_MOYENNE)) |> 
+  ggplot(aes(x = Group, y = TOTAL, fill = ESP, col = ESP)) +
+  geom_col() +
+  facet_wrap(~ quarter) +
+  theme_bw()+
+  ggtitle("Importance économique des différentes espèces par groupe et par trimestre")
+
+```
+
+```{r}
+df_sacrois_xgv_capt %>% 
+  filter(MONTANT_EUROS_MOYENNE < 8000) |> 
+#  mutate(MONTANT_EUROS_MOYENNE = pmin(MONTANT_EUROS_MOYENNE, 8000)) %>% 
+  rename(maree = MAREE_ID) %>% 
+  left_join(df_cvae_group) %>% 
+  mutate(year = year(time),
+         quarter = quarter(time)) |> 
+  mutate(ESP = case_match(ESP_COD_FAO,
+                                 "HKE" ~ ESP_COD_FAO,
+                                 "SOL" ~ ESP_COD_FAO,
+                                 "JOD" ~ ESP_COD_FAO,
+                                 "NEP" ~ ESP_COD_FAO,
+                                 "MNZ" ~ ESP_COD_FAO,
+                                 .default = "Others")) |> 
+  group_by(Group, quarter, ESP) |>
+  select(MONTANT_EUROS_MOYENNE) |> 
+  mutate(TOTAL = sum(MONTANT_EUROS_MOYENNE)) |> 
+  ggplot(aes(x = Group, y = TOTAL, fill = ESP, col = ESP)) +
+  geom_col(position = "fill") +
+  facet_wrap(~ quarter) +
+  theme_bw()+
+  ggtitle("Importance relative des différentes espèces par groupe et par trimestre")
+
+```
+
+## Intégration des groupes dans les calculs des LPUE
+
+Au niveau d'un trimestre (pour chaque année), un groupe est composé de navires
+ayant les mêmes similarité de comportement, en terme de trajectoires, par rapport
+au navire d'un autre groupe. C'est différent que de dire que chaque navire d'un 
+groupe à le même comportement.
+
+Nous proposons pour chaque jour de marée, un indice pondéré composé d'un effort 
+individuel (au niveau du navire) et un effort collectif (au niveau du groupe).
+
+Soit $E_{g,d} = \frac{1}{|b\in g|}\sum_{b\in g}E_{b,d}$, l'effort collectif 
+moyen du groupe $g$ pour le jour $d$. 
+On calcul de la même manière les débarquements de groupes. Le modèle 
+colSBM nous permet d'obtenir des proportions de connexions entre groupes (noté $\alpha$).
+On obtient ainsi pour chaque bateau un Effort modifié par l'effort collectif.
+Soit $LPUE_{g,d} = C_{g,d}/E_{g,d}$, alors pour $b \in g$,
+$$NLPUE_{b,d} = \frac{1}{|G|}\sum_{h \in G} \alpha_{gh}\frac{C_{b,d}}{E_{h,d}} + (1-\alpha_{gh})LPUE_{b,d}$$
+
+On peut ensuite pondérer chaque navire en fonction de l'effectif de chaque groupe 
+pour calculer les LPUE de la flotte:
+$$NLPUE_{d} = \frac{1}{G}\sum_{g}\frac{1}{|b\in g|}\sum_{b}NLPUE_{b,d}$$
+
+Cela permet de réduire le poids dans le calcul des navires effectuant le même 
+type de trajectoire, et ainsi donner plus d'importance à ceux ayant des 
+trajectoires isolés.
+
+## Calcul des LPUE relatives
+
+Nous calculons pour 4 types d'espèce (NEP, SOL, HKE, MNZ), les LPUE via trois méthodes :
+
+- La méthode naive, où chaque marée à le même poids
+- La méthode avec les effort normalisées de chaque marée
+- La méthode avec les effort normalisées de chaque marée et la pondération par groupe.
+
+### Les langoustines
+
+```{r}
+iidcolsbm_trim <- readRDS("../Rdata/save_sbmfit/iidcolsbm_trim.rds")
+alpha <- iidcolsbm_trim$alpha
+```
+
+
+```{r}
+df_nep <- df_sacrois_xgv_capt |> filter(ESP_COD_FAO == "NEP") |> 
+  select(TP_NAVIRE_SACROIS, MAREE_ID, QUANT_POIDS_VIF_MOYENNE) |> 
+  group_by(MAREE_ID) |> 
+  summarise(LANDINGS = sum(QUANT_POIDS_VIF_MOYENNE),
+            EFFORT = sum(TP_NAVIRE_SACROIS)) |> 
+  ungroup()
+df_nep <-   
+  df_nep |> 
+  rename(maree = MAREE_ID) |> 
+  left_join(df_cvae_group) |> 
+  mutate(year = factor(year(time)),
+         Group = LETTERS[Group]) |> 
+  mutate(Group = factor(Group, levels = LETTERS[1:5])) |>  
+  na.omit() |> 
+  filter(LANDINGS <= 1000) |> 
+  select(maree, time, navire, LANDINGS, EFFORT, Group)
+```
+
+On calcule juste les LPUE au second trimestre, ce qui correspond au trimestre de
+référence du WGBIE
+
+```{r}
+df_nep |> 
+  mutate(quarter = quarter(time), year = year(time)) |> 
+  filter(EFFORT >= 3) |> 
+  filter(quarter == 2) |> 
+  ggplot(aes(x = year, y = LANDINGS/EFFORT, group = year)) + 
+  geom_boxplot() +
+  theme_bw() +
+  ggtitle("Évolution des LPUE des NEP au second trimestre (naive)")
+```
+
+Les évolutions relatives de la médiane sont de :
+
+```{r}
+df_nep |> 
+  mutate(quarter = quarter(time), year = year(time)) |> 
+  filter(EFFORT >= 3) |> 
+  filter(quarter == 2) |> 
+  mutate(LPUE = LANDINGS/EFFORT) |> 
+  group_by(quarter, year) |> 
+  summarise(LPUE = median(LPUE)) |> 
+  mutate(REL_LPUE = LPUE/min(LPUE)) 
+  
+```
+
+
+```{r}
+df_nep |> 
+  mutate(quarter = quarter(time), year = year(time)) |> 
+  filter(EFFORT >= 3) |> 
+  filter(quarter == 2) |> 
+  ggplot(aes(x = year, y = LANDINGS/EFFORT, group = year, fill = Group)) + 
+  geom_boxplot() +
+  theme_bw() +
+  facet_wrap(~ Group) +
+  ggtitle("Évolution des LPUE des NEP au second trimestre par groupe (naive)")
+```
+```{r}
+group_effort <- df_nep |>   
+  group_by(Group, time) |> 
+  filter(quarter(time) == 2) |> 
+  summarise(EFFORT = mean(EFFORT))
+unique_navire <- df_nep |> filter(quarter(time) == 2) |> pull(navire) |> unique()
+unique_date <- df_nep |> filter(quarter(time) == 2) |> pull(time) |> unique()
+unique_group <- df_nep |> filter(quarter(time) == 2) |> pull(Group) |> unique()
+maree <- df_nep |> filter(quarter(time) == 2) |> pull(maree) |> unique()
+indiv_effort <- 
+  df_nep |> 
+  filter(quarter(time) == 2)
+norm_indiv_effort <- 
+ sapply(seq_along(maree),
+       function(m) {
+         df <- indiv_effort[m,]
+         geff <- group_effort |> filter(time == df$time)
+         mean(geff$EFFORT*iidcolsbm_trim$alpha[df$Group, geff$Group] +
+           (1-iidcolsbm_trim$alpha[df$Group, geff$Group])*df$EFFORT)
+       })
+```
+
+```{r}
+indiv_effort |> ungroup() |> 
+  mutate(NORM_EFFORT = norm_indiv_effort) |> 
+  mutate(year = factor(year(time))) |> 
+  mutate(NORM_LPUE = LANDINGS/NORM_EFFORT) |> 
+  group_by(Group, year) |> 
+  summarise(NORM_LPUE = mean(NORM_LPUE)) |> 
+  ggplot(aes(x = year, y = NORM_LPUE)) +
+  geom_boxplot() +
+  theme_bw() +
+  ggtitle("Évolution des LPUE des NEP au second trimestre",
+          subtitle = "Normalisation par groupe et valeur moyenne par groupe/jour")  
+```
+
+Les évolutions relatives de la médiane sont de :
+```{r}
+indiv_effort |> ungroup() |> 
+  mutate(NORM_EFFORT = norm_indiv_effort) |> 
+  mutate(year = factor(year(time))) |> 
+  mutate(NORM_LPUE = LANDINGS/NORM_EFFORT) |> 
+  group_by(Group, year) |> 
+  summarise(NORM_LPUE = mean(NORM_LPUE)) |>
+  ungroup() |> 
+  group_by(year) |> 
+  summarise(NORM_LPUE = median(NORM_LPUE)) |> 
+  mutate(NORM_LPUE = NORM_LPUE/min(NORM_LPUE))
+
+```
+
+### La sole
+
+!!! Attention !!! : Changement législatif en 2015 sur la taille des captures
+
+```{r}
+df_sol <- df_sacrois_xgv_capt |> filter(ESP_COD_FAO == "SOL") |> 
+  select(TP_NAVIRE_SACROIS, MAREE_ID, QUANT_POIDS_VIF_MOYENNE) |> 
+  group_by(MAREE_ID) |> 
+  summarise(LANDINGS = sum(QUANT_POIDS_VIF_MOYENNE),
+            EFFORT = sum(TP_NAVIRE_SACROIS)) |> 
+  ungroup() |> 
+  rename(maree = MAREE_ID) |> 
+  left_join(df_cvae_group) |> 
+  mutate(year = factor(year(time)),
+         Group = LETTERS[Group]) |> 
+  mutate(Group = factor(Group, levels = LETTERS[1:5])) |>  
+  na.omit() |> 
+  select(maree, time, navire, LANDINGS, EFFORT, Group)
+```
+
+```{r}
+df_sol |> 
+  mutate(quarter = quarter(time)) |> 
+  ggplot(aes(x = LANDINGS)) + 
+  geom_histogram(binwidth = .5) + 
+  theme_bw() +
+  facet_wrap(~ quarter) +
+  xlim(0,30) +
+  ggtitle("Histogramme des débarquements de sole par trimestre")
+```
+
+Vu le nombre de débarquements inférieur à 2kg, on peut s'intérroger à mettre un 
+filtre sur le poids de débarquement minimal.
+
+
+```{r}
+df_sol |> 
+  mutate(quarter = quarter(time), year = year(time)) |> 
+  filter(EFFORT >= 3) |> 
+#  filter(quarter == 2) |> 
+  ggplot(aes(x = year, y = LANDINGS/EFFORT, group = year)) + 
+  geom_boxplot() +
+  stat_summary(col = "blue") +
+  theme_bw() +
+  facet_wrap(~ quarter) +
+  ylim(0,3) +
+  ggtitle("Évolution des LPUE des SOL pour chaque trimestre (naive)")
+```
+
+Les évolutions relatives de la médiane sont de :
+
+```{r}
+df_sol |> 
+  mutate(quarter = quarter(time), year = year(time)) |> 
+  filter(EFFORT >= 3) |> 
+#  filter(quarter == 2) |> 
+  mutate(LPUE = LANDINGS/EFFORT) |> 
+  group_by(quarter, year) |> 
+  summarise(LPUE = median(LPUE)) |> 
+  mutate(REL_LPUE = LPUE/LPUE[1]) 
+  
+```
+
+
+```{r}
+df_sol |> 
+  mutate(quarter = quarter(time), year = year(time)) |> 
+  filter(EFFORT >= 3) |> 
+ # filter(quarter == 2) |> 
+  ggplot(aes(x = year, y = LANDINGS/EFFORT, group = year, fill = Group)) + 
+  geom_boxplot() +
+  theme_bw() +
+  stat_summary(col = "blue", fun = "mean") +
+  facet_grid(Group ~ quarter) + 
+  ylim(0,3) +
+  ggtitle("Évolution des LPUE des SOL au second trimestre par groupe (naive)")
+```
+
+On se concentre sur le premier trimestre pour l'évaluation des LPUE avec effort 
+normalisé.
+
+```{r}
+group_effort <- df_sol |>   
+  group_by(Group, time) |> 
+  filter(quarter(time) == 1) |> 
+  summarise(EFFORT = mean(EFFORT))
+unique_navire <- df_sol |> filter(quarter(time) == 1) |> pull(navire) |> unique()
+unique_date <- df_sol |> filter(quarter(time) == 1) |> pull(time) |> unique()
+unique_group <- df_sol |> filter(quarter(time) == 1) |> pull(Group) |> unique()
+maree <- df_sol |> filter(quarter(time) == 1) |> pull(maree) |> unique()
+indiv_effort <- 
+  df_sol |> 
+  filter(quarter(time) == 1)
+norm_indiv_effort <- 
+ sapply(seq_along(maree),
+       function(m) {
+         df <- indiv_effort[m,]
+         geff <- group_effort |> filter(time == df$time)
+         mean(geff$EFFORT*iidcolsbm_trim$alpha[df$Group, geff$Group] +
+           (1-iidcolsbm_trim$alpha[df$Group, geff$Group])*df$EFFORT)
+       })
+```
+
+```{r}
+indiv_effort |> ungroup() |> 
+  mutate(NORM_EFFORT = norm_indiv_effort) |> 
+  mutate(year = factor(year(time))) |> 
+  mutate(NORM_LPUE = LANDINGS/NORM_EFFORT) |> 
+  group_by(Group, year) |> 
+  summarise(NORM_LPUE = mean(NORM_LPUE)) |> 
+  ggplot(aes(x = year, y = NORM_LPUE)) +
+  geom_boxplot() +
+  theme_bw() +
+  ggtitle("Évolution des LPUE des SOL au second trimestre",
+          subtitle = "Normalisation par groupe et valeur moyenne par groupe/jour")  
+```
+
+Les évolutions relatives de la médiane sont de :
+```{r}
+indiv_effort |> ungroup() |> 
+  mutate(NORM_EFFORT = norm_indiv_effort) |> 
+  mutate(year = factor(year(time))) |> 
+  mutate(NORM_LPUE = LANDINGS/NORM_EFFORT) |> 
+  group_by(Group, year) |> 
+  summarise(NORM_LPUE = mean(NORM_LPUE)) |>
+  ungroup() |> 
+  group_by(year) |> 
+  summarise(NORM_LPUE = median(NORM_LPUE)) |> 
+  mutate(NORM_LPUE = NORM_LPUE/NORM_LPUE[1])
+
+```
+
+
+
+### La baudroie
+
+
+```{r}
+df_hke <- df_sacrois_xgv_capt |> filter(ESP_COD_FAO == "HKE") |> 
+  select(TP_NAVIRE_SACROIS, MAREE_ID, QUANT_POIDS_VIF_MOYENNE) |> 
+  group_by(MAREE_ID) |> 
+  summarise(LANDINGS = sum(QUANT_POIDS_VIF_MOYENNE),
+            EFFORT = sum(TP_NAVIRE_SACROIS)) |> 
+  ungroup() |> 
+  rename(maree = MAREE_ID) |> 
+  left_join(df_cvae_group) |> 
+  mutate(year = factor(year(time)),
+         Group = LETTERS[Group]) |> 
+  mutate(Group = factor(Group, levels = LETTERS[1:5])) |>  
+  na.omit() |> 
+  select(maree, time, navire, LANDINGS, EFFORT, Group)
+```
+
+```{r}
+df_hke |> 
+  mutate(quarter = quarter(time)) |> 
+  ggplot(aes(x = LANDINGS)) + 
+  geom_histogram(binwidth = .5) + 
+  theme_bw() +
+  facet_wrap(~ quarter) +
+  xlim(0,100) +
+  ggtitle("Histogramme des débarquements de sole par trimestre")
+```
+
+Vu le nombre de débarquements inférieur à 2kg, on peut s'intérroger à mettre un 
+filtre sur le poids de débarquement minimal.
+
+
+```{r}
+df_hke |> 
+  mutate(quarter = quarter(time), year = year(time)) |> 
+  filter(EFFORT >= 3) |> 
+#  filter(quarter == 2) |> 
+  ggplot(aes(x = year, y = LANDINGS/EFFORT, group = year)) + 
+  geom_boxplot() +
+  stat_summary(col = "blue") +
+  theme_bw() +
+  facet_wrap(~ quarter) +
+  ylim(0,5) +
+  ggtitle("Évolution des LPUE des HKE pour chaque trimestre (naive)")
+```
+
+Les évolutions relatives de la médiane sont de :
+
+```{r}
+df_hke |> 
+  mutate(quarter = quarter(time), year = year(time)) |> 
+  filter(EFFORT >= 3) |> 
+#  filter(quarter == 2) |> 
+  mutate(LPUE = LANDINGS/EFFORT) |> 
+  group_by(quarter, year) |> 
+  summarise(LPUE = median(LPUE)) |> 
+  mutate(REL_LPUE = LPUE/LPUE[1]) 
+  
+```
+
+
+```{r}
+df_hke |> 
+  mutate(quarter = quarter(time), year = year(time)) |> 
+  filter(EFFORT >= 3) |> 
+ # filter(quarter == 2) |> 
+  ggplot(aes(x = year, y = LANDINGS/EFFORT, group = year, fill = Group)) + 
+  geom_boxplot() +
+  theme_bw() +
+  stat_summary(col = "blue", fun = "mean") +
+  facet_grid(Group ~ quarter) + 
+  ylim(0,5) +
+  ggtitle("Évolution des LPUE des SOL au second trimestre par groupe (naive)")
+```
+
+On se concentre sur le quatrième trimestre pour l'évaluation des LPUE avec effort 
+normalisé. C'est un bon exemple pour évaluer le changement de la méthode de calcul car 
+les deux groupes principaux (B et D) sont quasiment stable alors que les petits groupes $A$ 
+et $E$ ont des variabilités pas au même moment.
+
+```{r}
+group_effort <- df_hke |>   
+  group_by(Group, time) |> 
+  filter(quarter(time) == 4) |> 
+  summarise(EFFORT = mean(EFFORT))
+unique_navire <- df_hke |> filter(quarter(time) == 4) |> pull(navire) |> unique()
+unique_date <- df_hke |> filter(quarter(time) == 4) |> pull(time) |> unique()
+unique_group <- df_hke |> filter(quarter(time) == 4) |> pull(Group) |> unique()
+maree <- df_hke |> filter(quarter(time) == 4) |> pull(maree) |> unique()
+indiv_effort <- 
+  df_hke |> 
+  filter(quarter(time) == 4)
+norm_indiv_effort <- 
+ sapply(seq_along(maree),
+       function(m) {
+         df <- indiv_effort[m,]
+         geff <- group_effort |> filter(time == df$time)
+         mean(geff$EFFORT*iidcolsbm_trim$alpha[df$Group, geff$Group] +
+           (1-iidcolsbm_trim$alpha[df$Group, geff$Group])*df$EFFORT)
+       })
+```
+
+```{r}
+indiv_effort |> ungroup() |> 
+  mutate(NORM_EFFORT = norm_indiv_effort) |> 
+  mutate(year = factor(year(time))) |> 
+  mutate(NORM_LPUE = LANDINGS/NORM_EFFORT) |> 
+  group_by(Group, year) |> 
+  summarise(NORM_LPUE = mean(NORM_LPUE)) |> 
+  ggplot(aes(x = year, y = NORM_LPUE)) +
+  geom_boxplot() +
+  theme_bw() +
+  ggtitle("Évolution des LPUE des HKE au 4eme trimestre",
+          subtitle = "Normalisation par groupe et valeur moyenne par groupe/jour")  
+```
+
+Les évolutions relatives de la médiane sont de :
+
+```{r}
+indiv_effort |> ungroup() |> 
+  mutate(NORM_EFFORT = norm_indiv_effort) |> 
+  mutate(year = factor(year(time))) |> 
+  mutate(NORM_LPUE = LANDINGS/NORM_EFFORT) |> 
+  group_by(Group, year) |> 
+  summarise(NORM_LPUE = mean(NORM_LPUE)) |>
+  ungroup() |> 
+  group_by(year) |> 
+  summarise(NORM_LPUE = median(NORM_LPUE)) |> 
+  mutate(NORM_LPUE = NORM_LPUE/NORM_LPUE[1])
+
+```
+
+Les résultats des LPUE relatives sont très différents de celle de l'estimateur 
+naif.
+
+```{r}
+df_hke |> 
+  mutate(quarter = quarter(time), year = year(time)) |> 
+  filter(EFFORT >= 3) |> 
+  filter(quarter == 4) |> 
+  mutate(LPUE = LANDINGS/EFFORT) |> 
+  group_by(quarter, year) |> 
+  summarise(LPUE = median(LPUE)) |> 
+  mutate(REL_LPUE = LPUE/LPUE[1]) 
+```
+
+### La cardine
+
+
+
+```{r}
+df_mnz <- df_sacrois_xgv_capt |> filter(ESP_COD_FAO == "MNZ") |> 
+  select(TP_NAVIRE_SACROIS, MAREE_ID, QUANT_POIDS_VIF_MOYENNE) |> 
+  group_by(MAREE_ID) |> 
+  summarise(LANDINGS = sum(QUANT_POIDS_VIF_MOYENNE),
+            EFFORT = sum(TP_NAVIRE_SACROIS)) |> 
+  ungroup() |> 
+  rename(maree = MAREE_ID) |> 
+  left_join(df_cvae_group) |> 
+  mutate(year = factor(year(time)),
+         Group = LETTERS[Group]) |> 
+  mutate(Group = factor(Group, levels = LETTERS[1:5])) |>  
+  na.omit() |> 
+  select(maree, time, navire, LANDINGS, EFFORT, Group)
+```
+
+```{r}
+df_mnz |> 
+  mutate(quarter = quarter(time)) |> 
+  ggplot(aes(x = LANDINGS)) + 
+  geom_histogram(binwidth = .5) + 
+  theme_bw() +
+  facet_wrap(~ quarter) +
+  xlim(0,100) +
+  ggtitle("Histogramme des débarquements de cardine par trimestre")
+```
+
+
+```{r}
+df_mnz|> 
+  mutate(quarter = quarter(time), year = year(time)) |> 
+  filter(EFFORT >= 3) |> 
+#  filter(quarter == 2) |> 
+  ggplot(aes(x = year, y = LANDINGS/EFFORT, group = year)) + 
+  geom_boxplot() +
+  stat_summary(col = "blue") +
+  theme_bw() +
+  facet_wrap(~ quarter) +
+  ylim(0,7) +
+  ggtitle("Évolution des LPUE des HKE pour chaque trimestre (naive)")
+```
+
+Les évolutions relatives de la médiane sont de :
+
+```{r}
+df_mnz |> 
+  mutate(quarter = quarter(time), year = year(time)) |> 
+  filter(EFFORT >= 3) |> 
+#  filter(quarter == 2) |> 
+  mutate(LPUE = LANDINGS/EFFORT) |> 
+  group_by(quarter, year) |> 
+  summarise(LPUE = median(LPUE)) |> 
+  mutate(REL_LPUE = LPUE/LPUE[1]) 
+  
+```
+
+Les LPUE augmentent au premier trimestre et decroient aux autres trimestres.
+
+```{r}
+df_mnz |> 
+  mutate(quarter = quarter(time), year = year(time)) |> 
+  filter(EFFORT >= 3) |> 
+ # filter(quarter == 2) |> 
+  ggplot(aes(x = year, y = LANDINGS/EFFORT, group = year, fill = Group)) + 
+  geom_boxplot() +
+  theme_bw() +
+  stat_summary(col = "blue", fun = "mean") +
+  facet_grid(Group ~ quarter) + 
+  ylim(0,7) +
+  ggtitle("Évolution des LPUE des MNZ par trimestre par groupe (naive)")
+```
+
+On se concentre sur le quatrième trimestre pour l'évaluation des LPUE avec effort 
+normalisé. Certaines campagnes scientifiques sont menés en fin d'année à partir d'octobre.
+
+```{r}
+group_effort <- df_mnz |>   
+  group_by(Group, time) |> 
+  filter(quarter(time) == 4) |> 
+  summarise(EFFORT = mean(EFFORT))
+unique_navire <- df_mnz |> filter(quarter(time) == 4) |> pull(navire) |> unique()
+unique_date <- df_mnz |> filter(quarter(time) == 4) |> pull(time) |> unique()
+unique_group <- df_mnz |> filter(quarter(time) == 4) |> pull(Group) |> unique()
+maree <- df_mnz |> filter(quarter(time) == 4) |> pull(maree) |> unique()
+indiv_effort <- 
+  df_mnz |> 
+  filter(quarter(time) == 4)
+norm_indiv_effort <- 
+ sapply(seq_along(maree),
+       function(m) {
+         df <- indiv_effort[m,]
+         geff <- group_effort |> filter(time == df$time)
+         mean(geff$EFFORT*iidcolsbm_trim$alpha[df$Group, geff$Group] +
+           (1-iidcolsbm_trim$alpha[df$Group, geff$Group])*df$EFFORT)
+       })
+```
+
+```{r}
+indiv_effort |> ungroup() |> 
+  mutate(NORM_EFFORT = norm_indiv_effort) |> 
+  mutate(year = factor(year(time))) |> 
+  mutate(NORM_LPUE = LANDINGS/NORM_EFFORT) |> 
+  group_by(Group, year) |> 
+  summarise(NORM_LPUE = mean(NORM_LPUE)) |> 
+  ggplot(aes(x = year, y = NORM_LPUE)) +
+  geom_boxplot() +
+  theme_bw() +
+  ggtitle("Évolution des LPUE des MNZ au 4eme trimestre",
+          subtitle = "Normalisation par groupe et valeur moyenne par groupe/jour")  
+```
+
+Les évolutions relatives de la médiane sont de :
+
+```{r}
+indiv_effort |> ungroup() |> 
+  mutate(NORM_EFFORT = norm_indiv_effort) |> 
+  mutate(year = factor(year(time))) |> 
+  mutate(NORM_LPUE = LANDINGS/NORM_EFFORT) |> 
+  group_by(Group, year) |> 
+  summarise(NORM_LPUE = mean(NORM_LPUE)) |>
+  ungroup() |> 
+  group_by(year) |> 
+  summarise(NORM_LPUE = median(NORM_LPUE)) |> 
+  mutate(NORM_LPUE = NORM_LPUE/NORM_LPUE[1])
+
+```
+
+Les résultats des LPUE relatives changent un peu, mais on observe la même chutte 
+entre 2017 et 2018. De manière intéressante, cette chutte n'est pas observé pour le groupe $B$ qui 
+voient même ces LPUE augmentaient par rapport à 2017.
+
+```{r}
+df_mnz |> 
+  mutate(quarter = quarter(time), year = year(time)) |> 
+  filter(EFFORT >= 3) |> 
+  filter(quarter == 4) |> 
+  mutate(LPUE = LANDINGS/EFFORT) |> 
+  group_by(quarter, year) |> 
+  summarise(LPUE = median(LPUE)) |> 
+  mutate(REL_LPUE = LPUE/LPUE[1]) 
+```

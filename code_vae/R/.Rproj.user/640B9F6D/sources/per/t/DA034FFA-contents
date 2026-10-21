@@ -1,0 +1,254 @@
+#===============================================================================
+# This script does the following
+# - Build quarterly graph from a fraction of all the imported proximity array 
+# - Fit a colSBM model on the data for each sub sample
+# - Export the fitted model for each sub sample
+#===============================================================================
+
+
+library(tidyverse)
+library(lubridate)
+library(mclust)
+#devtools::install_github("GrossSBM/colSBM",force=TRUE)
+library(colSBM)
+
+threshold <-  0.8
+quantile   <- 0.8
+
+
+bc_jour_cvae_ar <- readRDS("Rdata/bc_jour_cvae.rds")
+ldates <- readRDS("Rdata/ldates.rds")
+trim_year <- expand.grid(seq(4), seq(2014, 2018)) %>%
+  rename(Trim = Var1, Year = Var2)
+
+#===============================================================================
+# Build a list of vector of boolean. TRUE if vessels [i] has fishing days in 
+# quarter [[k]]
+#===============================================================================
+file_trim_peche = "./Rdata/trim_peche.rds"
+if (! file.exists(file_trim_peche)){
+trim_peche <- 
+   lapply(seq(20),
+          function(t) {
+            id <- which(
+              year(ldates) == trim_year$Year[t] &
+              (((month(ldates) + 3) %%4) + 1) == trim_year$Trim[t])
+            net <- 1*(
+              apply(
+                bc_jour_cvae_ar[id,,], 
+                c(2,3), 
+                "quantile", 
+                na.rm = TRUE, probs = quantile) > threshold)           
+            trim_peche_t <- ! is.na(diag(net))
+            return(trim_peche_t)
+          })
+saveRDS(trim_peche, file_trim_peche)
+}
+# Construct collection of full network
+net_BCq8_trim <-
+  lapply(seq(20),
+         function(t) {
+           id <- which(
+             year(ldates) == trim_year$Year[t] &
+               (((month(ldates) + 3) %%4) + 1) == trim_year$Trim[t])
+           
+           net <- 1*(
+             apply(
+               bc_jour_cvae_ar[id,,],
+               c(2,3),
+               "quantile",
+               na.rm = TRUE, probs = quantile) > threshold)
+           rownames(net) <- seq(33)
+           colnames(net) <- seq(33)
+           net <- net[! is.na(diag(net)), ! is.na(diag(net))]
+           diag(net) <- 0
+           net
+         })
+#===============================================================================
+# Toutes les données.  Retrouve-t-on les résultats? 
+#===============================================================================
+my_global_opts = list(nb_cores = 4,
+                      nb_models = 5,
+                      nb_init = 10,
+                      depth = 4,
+                      verbosity = 1,
+                      spectral_init = TRUE,
+                      Q_max = 7,
+                      plot_details = 1)
+
+file_res_full = paste0("Rdata/save_sbmfit/iidcolsbm_trim_round8.rds")
+if (! file.exists(file_res_full)){ 
+  
+  iidcol_trim_clust <- colSBM::estimate_colSBM(netlist = net_BCq8_trim,
+                                             colsbm_model = "iid",
+                                             net_id =  trim_year %>% transmute(trimyear = paste0(Trim, "_", Year)) %>% pull(trimyear),
+                                             nb_run = 20,
+                                             directed = FALSE, global_opts=my_global_opts)
+  saveRDS(iidcol_trim_clust, file_res_full)
+  rm(iidcol_trim_clust)
+}
+
+  
+#===============================================================================
+# Subsampling 
+#===============================================================================
+N_sub_sampl <- 30
+
+#---------- Create subnet 
+for (k in 1:(N_sub_sampl)) {
+  print(k)
+  file_sim=paste0("Rdata/save_colsbmfit_subsample/subnets_90/sub_net_",k,".Rdata")
+  sub_net_BCq8_trim  <- list()
+  
+  if (! file.exists(file_sim)) {
+    for (t in 1:20){
+      id.t <- which(year(ldates) == trim_year$Year[t] &
+                 (((month(ldates) + 3) %%4) + 1) == trim_year$Trim[t])
+      l_id.t <- length(id.t)
+      sub_id.t <- sample(id.t,floor(l_id.t*0.9))
+      sub_net.t <- 1*(apply(
+                 bc_jour_cvae_ar[sub_id.t,,],
+                 c(2,3),
+                 "quantile",
+                 na.rm = TRUE, probs = quantile) > threshold)
+      #trim_peche.t <- ! is.na(diag(sub_net.t))
+      rownames(sub_net.t) <- seq(33)
+      colnames(sub_net.t) <- seq(33)
+      sub_net.t <-sub_net.t[! is.na(diag(sub_net.t)), ! is.na(diag(sub_net.t))]
+      diag(sub_net.t) <- 0
+      sub_net_BCq8_trim[[t]] <- sub_net.t
+      #sub_trim_peche[[t]] <- trim_peche.t 
+      }
+   save(sub_net_BCq8_trim,file=file_sim)
+  }
+ 
+}
+
+#---------- estim iid col sbm
+
+                  
+for (k in 1:N_sub_sampl){
+   
+   print(paste("sub_sampl=",k))
+   load(file=paste0("Rdata/save_colsbmfit_subsample/subnets_90/sub_net_",k,".Rdata"))
+   file_res = paste0("Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/iidcolsbm_trim_sub_net_",k,".rds")
+#   
+# 
+   if (! file.exists(file_res)) {
+     iidcol_trim_clust <- colSBM::estimate_colSBM(netlist = sub_net_BCq8_trim,
+                                                                 colsbm_model = "iid",
+                                                                 net_id =  trim_year %>% transmute(trimyear = paste0(Trim, "_", Year)) %>% pull(trimyear),
+                                                                 nb_run = 8,
+                                                                 directed = FALSE, global_opts=my_global_opts)
+     saveRDS(iidcol_trim_clust, file_res)
+     rm(iidcol_trim_clust)
+     gc()  
+   }
+# 
+}
+
+
+#===============================================================================
+#  Exploitation résultats. 
+#===============================================================================
+# full data  : sert de reference 
+file_res_full_round5 = paste0("Rdata/save_sbmfit/iidcolsbm_trim_round7.rds")
+file_res_full_round1 = paste0("Rdata/save_sbmfit/iidcolsbm_trim.rds")
+
+iidcol_trim_clust_full_round1 <- readRDS(file_res_full_round1)
+iidcol_trim_clust_full_round5 <- readRDS(file_res_full_round5)
+bestfit_round5 <- iidcol_trim_clust_full_round5$model_list[[1]][[5]][[1]]
+
+o_5 = order(bestfit_round5$parameters$alpha %*% as.matrix(bestfit_round5$parameters$pi[[1]],ncol=1),decreasing = TRUE)
+o_1 = order(iidcol_trim_clust_full_round1$parameters$alpha %*% as.matrix(iidcol_trim_clust_full_round1$parameters$pi[[1]],ncol=1),decreasing = TRUE)
+
+
+
+plot(bestfit_round5, type = "graphon",ord=o_5) + plot(iidcol_trim_clust_full_round1, type = "graphon",ord=o_1)
+
+
+plot(iidcol_trim_clust_full_round5)
+bestfit_round5 <- iidcol_trim_clust_full_round5$best_fit
+plot(bestfit_round5, type = "graphon")
+
+plot(iidcol_trim_clust_full_round1, type = "graphon")
+
+table(iidcol_trim_clust_full_round1$Z[[1]],bestfit_round5$Z[[1]])
+
+table(iidcol_trim)
+
+bestfit_round5_Z <- bestfit_round5$Z
+for (l in 1:20){
+  names(bestfit_round5_Z[[l]]) <- rownames(bestfit_round5$A[[l]])
+}
+
+
+Qselect = 5
+Z_full_bestfit_round5 <- lapply(1:20,function(l){
+   v=rep(NA,33); 
+   v[trim_peche[[l]]]<- iidcol_trim_clust_full_round5$model_list[[1]][[Qselect]][[1]]$Z[[l]]
+   return(v)
+})
+
+
+
+############## recup des Zfull pour tous les neouds avec des NA si le neoud n'est pas présent. 
+
+########### for all subsample
+
+
+Q_estim <- rep(0,N_sub_sampl)
+Ari_estim <- matrix(0,N_sub_sampl,20)
+# 
+  
+for (k in 1:N_sub_sampl){
+   file_res = paste0("Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/iidcolsbm_trim_sub_net_",k,".rds")
+   iidcol_trim_clust_k <- readRDS(file_res)
+   Q_estim[k] <- iidcol_trim_clust_k$best_fit$Q
+   print(c(k,Q_estim[k]))
+
+   chose_model_k <- iidcol_trim_clust_k$best_fit
+   chose_model_k <- iidcol_trim_clust_k$model_list[[1]][[Qselect]][[1]]
+   
+   
+   for (l in  1:20 ){
+      w_trim_peche_k_l = as.numeric(rownames(iidcol_trim_clust_k$A[[l]]))
+      Z_k_l_bestfit =rep(NA,33); 
+      Z_k_l_bestfit[w_trim_peche_k_l]<- chose_model_k$Z[[l]]
+      
+      r= is.na(Z_k_l_bestfit) + is.na(Z_full_bestfit_round5[[l]])
+      
+      #table(Z_k_l_bestfit,Z_full_round3[[l]])
+      #table(Z_k_l_Q5,Z_full_round3[[l]])
+      Ari_estim[k,l] <-  adjustedRandIndex(Z_k_l_bestfit[r==0],Z_full_bestfit_round5[[l]][r==0])
+  }  
+}
+
+######################################
+U <- which(Q_estim==6)
+hist(Ari_estim)
+ 
+
+######################################
+
+k <- sample(1:30,1)
+file_res = paste0("Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/iidcolsbm_trim_sub_net_",k,".rds")
+
+
+
+iidcol_trim_clust_k <- readRDS(file_res)
+
+iidcol_trim_clust_k[1][[3]][1]
+
+o_ref = order(bestfit_round5$parameters$alpha %*% as.matrix(best_fit_round5$parameters$pi[[1]],ncol=1),decreasing = TRUE)
+o_k = order(iidcol_trim_clust_k$best_fit$parameters$alpha %*% as.matrix(iidcol_trim_clust_k$best_fit$parameters$pi[[1]],ncol=1),decreasing = TRUE)
+
+
+library(patchwork)
+plot(bestfit_round5, type = "graphon",ord=o_ref) + plot(iidcol_trim_clust_k$best_fit, type = "graphon",ord=o_k)
+mean(Ari_estim[k,])
+
+
+
+
+

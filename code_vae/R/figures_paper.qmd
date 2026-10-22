@@ -550,8 +550,7 @@ p_groups <- ggplot(Mat_groups, aes(x = Group, y = navire, alpha = Prop, fill = G
   labs(y = "Vessel") +
   theme_minimal(base_size = 14, base_line_size = 0)
 
-p_meso + p_groups + plot_layout(widths = c(3, 1.2)) &
-  theme(legend.position = "none")
+p_meso + p_groups + plot_layout(widths = c(3, 1.2))
 ```
 
 ## Figure 11 -- Trajectories, latent space and income per group {#sec-fig-group}
@@ -731,7 +730,7 @@ array(unlist(trim_matrices), dim = c(33, 33, 20)) |>
 `images2/bootstrap_results_90.png`.* colSBM fitted on 30 collections of networks built
 from 90% of the days of each quarter (fits saved in
 `Rdata/save_colsbm_bootstrap/fits_90/`). Top: mesoscale structure of one
-bootstrap sample per value of $\hat R$, with groups aligned on the full-data
+bootstrap sample per value of $\hat K$, with groups aligned on the full-data
 fit by minimising the $L_2$ distance between graphons. Bottom: ARI between the
 bootstrap and the full-data clusterings, for each sample and each quarter.
 
@@ -749,9 +748,9 @@ N_sub <- 30
 boot_fits <- lapply(seq(N_sub), function(k) readRDS(sprintf(
   "./Rdata/save_colsbm_bootstrap/fits_90/iidcolsbm_trim_sub_net_%d.rds", k))$best_fit)
 
-R_hat <- sapply(boot_fits, \(f) f$nb_clusters)
-round(100 * prop.table(table(R_hat)))
-# replicates shown in the paper: one with R_hat = 6, one with R_hat = 5
+K_hat <- sapply(boot_fits, \(f) f$nb_clusters)
+round(100 * prop.table(table(K_hat)))
+# replicates shown in the paper: one with K_hat = 6, one with K_hat = 5
 m_show <- c(3, 4)
 
 Z_full <- get_Ztrim(iidcolsbm_trim)
@@ -767,14 +766,14 @@ summary(c(ARI))
 
 ```{r}
 #| label: fig-bootstrap
-#| fig-cap: "Top: estimated mesoscale structures obtained from one bootstrap sample per selected number of blocks R. Bottom: histogram of the adjusted Rand index (ARI) between bootstrap and full-data clusterings."
+#| fig-cap: "Top: estimated mesoscale structures obtained from one bootstrap sample per selected number of blocks K. Bottom: histogram of the adjusted Rand index (ARI) between bootstrap and full-data clusterings."
 #| fig-width: 9
 #| fig-height: 8
 plot_boot <- function(m) {
   f <- boot_fits[[m]]
   o <- get_order_withref(f, iidcolsbm_trim, best_ord)
   plot(f, type = "graphon", ord = o) +
-    ggtitle(bquote(m == .(m) ~ "," ~ hat(R) == .(f$nb_clusters))) +
+    ggtitle(bquote(m == .(m) ~ "," ~ hat(K) == .(f$nb_clusters))) +
     theme(legend.position = "none", plot.title = element_text(size = 12))
 }
 

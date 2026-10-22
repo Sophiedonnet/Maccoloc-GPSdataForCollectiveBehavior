@@ -10,8 +10,8 @@
 # 3. Fit an iid-colSBM on each bootstrap collection
 # 4. Check that the bootstrap collections (and fitted networks) are distinct
 # 5. Compare the bootstrap fits with the full-data fit:
-#    - distribution of the estimated number of blocks R_hat
-#    - mesoscale structure of one bootstrap sample per value of R_hat
+#    - distribution of the estimated number of blocks K_hat
+#    - mesoscale structure of one bootstrap sample per value of K_hat
 #    - ARI between bootstrap and full-data clusterings, per quarter
 #
 # Inputs (produced by 06_build_proximity_graph.R and 07b_...R):
@@ -202,11 +202,11 @@ stopifnot(!any(sapply(fit_networks, identical, lapply(net_BCq8_trim, unname))))
 #===============================================================================
 
 #------------- Number of blocks selected on each bootstrap replicate
-R_hat <- sapply(boot_fits, function(f) f$nb_clusters)
-table(R_hat) / N_boot * 100
+K_hat <- sapply(boot_fits, function(f) f$nb_clusters)
+table(K_hat) / N_boot * 100
 
 
-#------------- Mesoscale structures: one replicate per value of R_hat
+#------------- Mesoscale structures: one replicate per value of K_hat
 # The blocks are ordered as for the full-data fit (get_order), and the blocks
 # of each replicate are permuted to minimise the L2 distance between its
 # graphon and the one of the full-data fit.
@@ -216,12 +216,12 @@ plot_boot <- function(m) {
   f <- boot_fits[[m]]
   o <- get_order_withref(fit = f, fit_ref = bestfit_full, order_ref = o_full)
   plot(f, type = "graphon", ord = o) +
-    ggtitle(bquote(m == .(m) ~ "," ~ hat(R) == .(f$nb_clusters))) +
+    ggtitle(bquote(m == .(m) ~ "," ~ hat(K) == .(f$nb_clusters))) +
     theme(plot.title = element_text(size = 12), legend.position = "none")
 }
-# first replicate for each value of R_hat, most frequent value first
-R_freq <- sort(table(R_hat), decreasing = TRUE)
-m_show <- sapply(as.integer(names(R_freq)), function(r) which(R_hat == r)[1])
+# first replicate for each value of K_hat, most frequent value first
+K_freq <- sort(table(K_hat), decreasing = TRUE)
+m_show <- sapply(as.integer(names(K_freq)), function(r) which(K_hat == r)[1])
 
 m_show=c(3,4)
 

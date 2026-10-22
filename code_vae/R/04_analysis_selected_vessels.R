@@ -159,6 +159,7 @@ p_traj_latent <- (df_traj   %>%
     geom_path(linewidth = .5, alpha = .5, show.legend = FALSE) +
     geom_point(aes(alpha = month), size = 1, show.legend = FALSE) + 
     facet_grid(navire ~ .) + coord_fixed() +
+    labs(x = expression(y[1]), y = expression(y[2])) +
     xlim(-7.5, 5) + ylim(-6,2) +
     gghighlight::gghighlight((month %in% c("6","12") & year == "2015"),
                              calculate_per_facet = TRUE) +

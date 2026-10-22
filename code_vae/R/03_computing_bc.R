@@ -21,9 +21,6 @@
 #   (used by all the following scripts): columns mu_k (means) and sig_k
 #   (VARIANCES gamma^2_k, despite the name)
 # - images2/plot_dimension.png (Figure 4)
-#
-# Note: the couples of trips are sampled without a seed: the figure changes
-# slightly from one run to the next.
 #===============================================================================
 
 
@@ -71,6 +68,7 @@ df_cvae <- df_cvae %>% rename(mu_1 = `0...7`, mu_2 = `1...8`, mu_3 = `2...9`,
 #===============================================================================
 # 2e5 couples are drawn, couples of a trip with itself are removed and the
 # first 1e5 are kept
+set.seed(1234)
 n_traj <- nrow(df_cvae)
 ord1 <- sample(n_traj, 2e5, replace = TRUE)
 ord2 <- sample(n_traj, 2e5, replace = TRUE)

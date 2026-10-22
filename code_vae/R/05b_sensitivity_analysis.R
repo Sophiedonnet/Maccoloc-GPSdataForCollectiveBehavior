@@ -16,16 +16,12 @@
 # - Predict D_max and theta_max from (z_1, z_2, cos m, sin m) with a random
 #   forest, and compute the Sobol-MDA index of each input (Figure 8)
 #
-# Input: generated_traj_cvae3.csv (py_workflow/cvae_analysis.ipynb)
-#
-# Note: the script reads ./pydata/generated_traj_cvae3.csv, but the file of
-# the repository is ../py_workflow/generated_traj_cvae3.csv: copy it to
-# pydata/ (or change the path) before running.
+# Input: ../py_workflow/generated_traj_cvae3.csv (py_workflow/cvae_analysis.ipynb)
 #
 # Notes:
 # - The paper reports 10 replications with independently simulated sets of
 #   3000 trajectories; this script uses the single grid of trajectories of the
-#   input file and one forest (no seed).
+#   input file and one forest.
 #
 # Output: images2/sobol_indices.png
 #===============================================================================
@@ -40,7 +36,7 @@ rm(list = ls())
 source("./99_helper_functions.R")
 # Data
 
-donnees <- read.table("./pydata/generated_traj_cvae3.csv",
+donnees <- read.table("../py_workflow/generated_traj_cvae3.csv",
                       sep = ",",
                       header = TRUE,
                       row.names = 1) %>% 
@@ -102,6 +98,7 @@ donnees <- donnees |>
 #===============================================================================
 # Random forests and Sobol-MDA indices
 #===============================================================================
+set.seed(1234) # ranger draws its seed from R's random number generator
 best_model_max_theta <- sobolMDA::ranger(formula = max_theta ~ mu1 + mu2 + cos_eta + sin_eta,
                                          num.trees = 500, data = donnees,
                                          importance = "sobolMDA", mtry = 3, 

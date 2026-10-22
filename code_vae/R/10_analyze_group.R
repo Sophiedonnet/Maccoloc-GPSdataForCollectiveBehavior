@@ -29,13 +29,13 @@
 
 library(tidyverse)
 library(lubridate)
-library(ggplotFL)
+library(ggplotFL) # stat_flquantiles(); attaches FLCore, which masks a few
+                  # tidyverse functions (n, desc, spread, %+%) not used here
 library(patchwork)
 source("./99_helper_functions.R")
 source('./98_functions_resampling.R')
-#library(devtools)
-#install_github("flr/ggplotFL")
-#install_github("flr/FLCore")
+# install.packages(c("FLCore", "ggplotFL"),
+#                  repos = c("https://flr.r-universe.dev", "https://cloud.r-project.org"))
 
 
 #===============================================================================
@@ -105,7 +105,7 @@ ggplot_incomes <- ggplot(df_xgv_capt2,aes(y = MONTANT, x = date, fill = Group, c
                    linetype=3) +
   stat_flquantiles(probs=c(0.25, 0.75), geom = "ribbon",
                    alpha=0.30) +
-  stat_flquantiles(probs=c(0.50), geom = "line", size=1.5) +
+  stat_flquantiles(probs=c(0.50), geom = "line", linewidth=1.5) +
   stat_flquantiles(probs=c(0.50), geom = "line", col = "black") +
   #    geom_boxplot(position = "dodge") +
   ylim(c(0, 5000)) + 
@@ -114,7 +114,9 @@ ggplot_incomes <- ggplot(df_xgv_capt2,aes(y = MONTANT, x = date, fill = Group, c
   facet_wrap(~ Group, ncol = Q) +
   theme_bw(base_size = 20) #+
 
-p_income <- ggplot_incomes + ylab('') + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+p_income <- ggplot_incomes + ylab('') +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        legend.position = "none")
 p_income
 ggsave("./images2/income_per_trip_noguide.png", p_income, width = 15, height = 5, dpi = 300)
 

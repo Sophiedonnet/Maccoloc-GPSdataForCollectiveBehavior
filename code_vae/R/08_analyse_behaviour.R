@@ -194,11 +194,12 @@ bclag_navire_cvae <- bhattacharyya_1d(
 # Compute GSI
 #===============================================================================
 # For each vessel, BC between 2e4 random couples of distinct trips
-# (2e4 x 33 matrix). No seed: the GSI vary slightly from one run to the next.
+# (2e4 x 33 matrix)
 mu_cvae <- as.matrix(df_cvae |> select(starts_with("mu")))
 sig2_cvae <- as.matrix(df_cvae |> select(starts_with("sig")))
 
 
+set.seed(1234)
 bc_navire <- sapply(seq(33),
                        function(b) {
                          ind <- df_cvae$navire == unique(df_cvae$navire)[b]
@@ -351,12 +352,12 @@ breaks1 <-  c(p$data$xmax[1:Q], 1)
 breaks2 <- (breaks1[-1] + breaks1[-(Q+1)])/2
 labels1 <- round(breaks1, 2)
 labels2 <- LETTERS[1:Q]
-p <- p +  scale_y_continuous(labels = labels1, breaks = breaks1,trans = "reverse", 
-                      sec.axis = sec_axis(trans = "identity", 
+p <- p +  scale_y_continuous(labels = labels1, breaks = breaks1,transform = "reverse", 
+                      sec.axis = sec_axis(transform = ~ ., 
                                           labels = labels2, 
                                           breaks = breaks2)) +
    scale_x_continuous(labels = labels1, breaks = breaks1, 
-                      sec.axis = sec_axis(trans = "identity", 
+                      sec.axis = sec_axis(transform = ~ ., 
                                           labels = labels2, 
                                           breaks = breaks2)) + 
    theme_bw(base_size = 20) + 
@@ -374,7 +375,7 @@ gg_Mat_groups <- ggplot(Mat_groups ,aes(x = Group, y = Vessel, alpha = Prop, fil
     geom_tile() + #scale_fill_gradient2() +
     scale_fill_discrete() +
     geom_hline(yintercept = seq(0,33) + .5) +
-    geom_vline(xintercept = seq(0,5) + .5) + # assumes 5 groups: the line after group F is missing when Q = 6
+    geom_vline(xintercept = seq(0,Q) + .5) +
     scale_alpha_continuous(range = c(0,1)) +
     geom_hline(yintercept = c(5, 6, 1, 2, 18, 19) + 0.5, 
                col = "red", linewidth = 1.1) +
@@ -387,12 +388,10 @@ gg_Mat_groups <- ggplot(Mat_groups ,aes(x = Group, y = Vessel, alpha = Prop, fil
            alpha = guide_bins(reverse = TRUE)) +
     theme_minimal(base_size = 20, base_line_size = 0)
 
-# Connectivity matrix (left) and memberships (right), without legends
-p_group <- p + gg_Mat_groups + plot_layout(widths = c(6.5, 2)) &
-  theme(legend.position = "none")
+p_group <- gg_Mat_groups + guide_area() +  p +    plot_layout(guides = 'collect', design = c("CBA"), widths = c(6.5,1,2)) 
 
 p_group
-ggsave("./images2/iidcolsbm_group_trim.png", p_group, width = 11, height = 7, dpi = 300)
+ggsave("./images2/iidcolsbm_group_trim.png", p_group, width = 14, height = 7, dpi = 300)
 
  
  

@@ -94,7 +94,7 @@ df_xgv_capt2 <- df_xgv_capt %>%
 rev_moyen <- df_xgv_capt2%>% group_by(Group) %>% summarise(MONTANT = mean(MONTANT, na.rm = TRUE))
 print(rev_moyen)
 
-ggplot_incomes <- ggplot(df_xgv_capt2,aes(y = MONTANT, x = date, fill = Group, col = Group)) +
+ggplot_incomes <- ggplot(df_xgv_capt2,aes(y = MONTANT / 1000, x = date, fill = Group, col = Group)) +
   #  geom_smooth() +
   #       stat_ecdf(linewidth = 1.1) +
   stat_flquantiles(probs=c(0.10, 0.90), geom = "ribbon",
@@ -108,13 +108,14 @@ ggplot_incomes <- ggplot(df_xgv_capt2,aes(y = MONTANT, x = date, fill = Group, c
   stat_flquantiles(probs=c(0.50), geom = "line", linewidth=1.5) +
   stat_flquantiles(probs=c(0.50), geom = "line", col = "black") +
   #    geom_boxplot(position = "dodge") +
-  ylim(c(0, 5000)) + 
+  # zoom only (unlike ylim(), keeps the trips above 5 kEuros in the quantiles)
+  coord_cartesian(ylim = c(0, 5)) +
   xlab("Date") +
-  ylab("Income per trip (Euros)") +
+  ylab("Income per trip (kEuros)") +
   facet_wrap(~ Group, ncol = Q) +
   theme_bw(base_size = 20) #+
 
-p_income <- ggplot_incomes + ylab('') +
+p_income <- ggplot_incomes +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
         legend.position = "none")
 p_income

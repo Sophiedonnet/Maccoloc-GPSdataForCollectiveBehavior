@@ -26,7 +26,8 @@
 # - The paper reports 10 replications with independently simulated sets of
 #   3000 trajectories; this script uses the single grid of trajectories of the
 #   input file and one forest (no seed).
-# - The figure is not saved by the script (no ggsave).
+#
+# Output: images2/sobol_indices.png
 #===============================================================================
 
 library(tidyverse)
@@ -146,7 +147,7 @@ my_theme <- function(base_size = 12){
       plot.title = element_text(face = "bold", size = rel(1.2), hjust = 0.5))
 }
 theme_set(my_theme(20))
-ggplot(importances) + 
+p_sobol <- ggplot(importances) + 
   aes(y = Importance, x = rowname, col = metric) +
   geom_point(size = 5) +
   ylim(c(-0.01,1)) +
@@ -162,3 +163,8 @@ ggplot(importances) +
   labs(x = "Variable",
        y = "Importance") #+ 
 #  facet_wrap(~metric, labeller = label_parsed)
+
+ggsave("./images2/sobol_indices.png", p_sobol, width = 9, height = 6, dpi = 300)
+# Note: with Rscript, printing the plot opens a PDF device that cannot load
+# the "LM Roman 10" font of my_theme (error "police PDF CID"): save first.
+p_sobol

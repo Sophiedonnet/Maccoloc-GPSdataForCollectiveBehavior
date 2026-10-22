@@ -16,10 +16,11 @@
 # - Rdata/xgv_100_14-18.csv (02_merge_xgv.R): hourly positions of each trip
 # - Rdata/xgv_{cvae_3,vae_4}_reordered_filtered.csv (03_computing_bc.R)
 #
-# Notes:
-# - The vessels are numbered 1..33 in their order of appearance in df_cvae;
-#   this numbering is used in all the figures of the paper.
-# - The figures are not saved by the script (no ggsave).
+# Outputs: images2/plot_ts_mu.png (Figure 5) and
+# images2/plot_traj_latent_2-6-19_new.png (Figure 6)
+#
+# Note: the vessels are numbered 1..33 in their order of appearance in df_cvae;
+# this numbering is used in all the figures of the paper.
 #===============================================================================
 
 #===============================================================================
@@ -56,7 +57,7 @@ bpp = 19
 # the variational distribution of each trip, and band mu +/- z * gamma, with
 # gamma = sqrt(sig) the standard deviation.
 # Note: z = qnorm(.95) ~ 1.645 here, while the caption of the paper states 1.96.
-df_vae %>% filter(navire == navire_id[b]) %>% 
+p_ts_mu <- df_vae %>% filter(navire == navire_id[b]) %>% 
   mutate(model = "VAE") %>%
   bind_rows(df_cvae %>% filter(navire == navire_id[b]) %>% 
               mutate(model = "CVAE")) %>% 
@@ -117,6 +118,8 @@ df_vae %>% filter(navire == navire_id[b]) %>%
      ggtitle(paste0(bpp)) +
      theme_bw(base_size = 20)) +   
   plot_layout(guides = "collect")
+p_ts_mu
+ggsave("./images2/plot_ts_mu.png", p_ts_mu, width = 16, height = 9, dpi = 300)
 
 
 
@@ -135,7 +138,7 @@ df_traj <- df_traj |>
         y_std = coord2std(y, 47.78)) 
 
 boat <- c(2, 6, 19)
-(df_traj   %>% 
+p_traj_latent <- (df_traj   %>% 
     filter(navire %in% navire_id[boat]) %>% 
     mutate(maree = as_factor(maree),
            #navire = as_factor(navire),
@@ -190,4 +193,8 @@ boat <- c(2, 6, 19)
      xlim(-3, 3) + 
      ylim(-3,3) + 
      scale_color_manual(values = c("tomato", "steelblue")) +
+     labs(x = expression(mu[1]), y = expression(mu[2])) +
      theme_bw(base_size = 20))
+p_traj_latent
+ggsave("./images2/plot_traj_latent_2-6-19_new.png", p_traj_latent,
+       width = 14, height = 12, dpi = 300)

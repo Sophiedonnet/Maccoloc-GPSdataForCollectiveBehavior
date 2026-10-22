@@ -20,8 +20,7 @@
 # - Rdata/xgv_100_14-18.csv (02_merge_xgv.R)
 #
 # Outputs:
-# - images2/Ammount_per_trip_per_group.png: Figure 11 (b)
-#   (income_per_trip_noguide.png in the paper)
+# - images2/income_per_trip_noguide.png: Figure 11 (b)
 # - images2/latent_space_group.png: Figure 11 (a)
 # - Rdata/sacrois_xgv_capt_group.csv: positions of the trips with their group
 #
@@ -115,9 +114,9 @@ ggplot_incomes <- ggplot(df_xgv_capt2,aes(y = MONTANT, x = date, fill = Group, c
   facet_wrap(~ Group, ncol = Q) +
   theme_bw(base_size = 20) #+
 
-ggplot_incomes + ylab('') + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
-
-ggsave("./images2/Ammount_per_trip_per_group.png", height = 8, width = 12)
+p_income <- ggplot_incomes + ylab('') + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+p_income
+ggsave("./images2/income_per_trip_noguide.png", p_income, width = 15, height = 5, dpi = 300)
 
 
 #===============================================================================
@@ -134,6 +133,7 @@ p_lat <- df_cvae_group %>%
   #  geom_abline() +
   stat_bin_2d(aes(alpha = after_stat(ndensity)), show.legend = FALSE) +
   coord_fixed() + ylim(-2.5, 2.5) +
+  labs(x = expression(mu[1]), y = expression(mu[2])) +
   facet_wrap(~ Group, ncol = Q) +
   theme_bw(base_size = 20)  +
   theme(
@@ -150,6 +150,7 @@ p_lat2 <- df_cvae_group %>%
   #  geom_abline() +
   stat_bin_2d(aes(alpha = after_stat(ndensity)), show.legend = FALSE) +
   coord_fixed() + ylim(-2.5, 2.5) +
+  labs(x = expression(mu[1]), y = expression(mu[2])) +
   facet_grid(quarter~ Group) +
   theme_bw(base_size = 20)  +
   theme(
@@ -178,7 +179,7 @@ p_traj <- df_traj_group %>%
   annotate("path", x = df_traj_group$x, y = df_traj_group$y, 
            col = "gray70", alpha = .5) + #, group = df_traj_std_group$maree) + 
   geom_path(show.legend = FALSE, alpha = .1) +
-  xlab("y_1") + ylab("y_2") +
+  labs(x = NULL, y = NULL) +
   # gghighlight::gghighlight(,
   #                          calculate_per_facet = TRUE) + 
   #  geom_point(aes(alpha = h/24), show.legend = FALSE) +
@@ -186,7 +187,8 @@ p_traj <- df_traj_group %>%
   facet_wrap(~ Group, ncol = Q) +
   theme_bw(base_size = 20)
 
-p_all <- (p_traj/p_lat ) + plot_layout(heights = unit(c(-1,2),c("null","null")))
-p_all <- cowplot::align_plots(p_traj, p_lat)
+# Trajectories above the latent space (patchwork). The former version used
+# cowplot::align_plots(), which returns a list: ggsave() only drew p_lat.
+p_all <- p_traj / p_lat
 p_all
-ggsave("./images2/latent_space_group.png", plot = p_all, height = 7.5, width = 15)
+ggsave("./images2/latent_space_group.png", plot = p_all, width = 15, height = 7.5, dpi = 300)

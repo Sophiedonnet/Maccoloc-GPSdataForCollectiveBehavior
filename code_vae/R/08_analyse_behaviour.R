@@ -22,7 +22,7 @@ rm(list=ls())
 #   20 quarterly proximity graphs
 #
 # Outputs (in images2/):
-# - proxy_graph_trim_nous.png      : Figure A2 (proxy_graph_trim.png in the paper)
+# - proxy_graph_trim.png           : Figure A2
 # - bc_group_colsbm_trim_cvae.png  : Figure 9
 # - iidcolsbm_group_trim.png       : Figure 10
 #
@@ -129,7 +129,7 @@ patchwork::wrap_plots(p_list_trim, ncol = 4, tag_level = 'keep', byrow = TRUE) +
 # Figure A2: the 20 quarterly proximity graphs (rows: quarters, columns:
 # years). Black: edge; pink: NA (vessel not active during the quarter, or
 # couple of vessels that never fished the same day).
-array(unlist(trim_matrices), dim = c(33,33,20)) |>
+p_proxy <- array(unlist(trim_matrices), dim = c(33,33,20)) |>
   reshape2::melt() |> 
   mutate(Quarter = (Var3-1)%%4 + 1) |> 
   mutate(Year = (Var3-1)%/%4 + 1) |> 
@@ -147,7 +147,8 @@ array(unlist(trim_matrices), dim = c(33,33,20)) |>
   theme_bw(base_size = 15) +
   theme(axis.text = element_blank(), axis.ticks = element_blank())
 
-ggsave("./images2/proxy_graph_trim_nous.png", scale = 2)
+p_proxy
+ggsave("./images2/proxy_graph_trim.png", p_proxy, width = 13, height = 11, dpi = 300)
 
 #trim_matrices[[1]]
 
@@ -285,7 +286,7 @@ anno <- tibble(dist = mean(bc_cvae > .8),
 #===============================================================================
 # Each vessel is a pie at (DSI, GSI) showing the proportions of its group
 # memberships. Vessels 2, 6 and 19 (Figures 5-6) are labelled in red.
-bc_seuil_navire%>%
+p_bc_group <- bc_seuil_navire%>%
   left_join(Mat_navire) %>%
   filter(Model == "c-vae") %>%
   ggplot() + xlab("DSI") + ylab("GSI") + xlim(0.15,NA) + ylim(0,0.2) +
@@ -332,7 +333,8 @@ bc_seuil_navire%>%
              col = "black", size = 8, shape = 18)
 
 
-ggsave("./images2/bc_group_colsbm_trim_cvae.png", dpi = 300)
+p_bc_group
+ggsave("./images2/bc_group_colsbm_trim_cvae.png", p_bc_group, width = 12, height = 5, dpi = 300)
 
 
 #===============================================================================
@@ -385,9 +387,12 @@ gg_Mat_groups <- ggplot(Mat_groups ,aes(x = Group, y = Vessel, alpha = Prop, fil
            alpha = guide_bins(reverse = TRUE)) +
     theme_minimal(base_size = 20, base_line_size = 0)
 
-gg_Mat_groups + guide_area() +  p +    plot_layout(guides = 'collect', design = c("CBA"), widths = c(6.5,1,2)) 
+# Connectivity matrix (left) and memberships (right), without legends
+p_group <- p + gg_Mat_groups + plot_layout(widths = c(6.5, 2)) &
+  theme(legend.position = "none")
 
-ggsave("./images2/iidcolsbm_group_trim.png", dpi = 300)
+p_group
+ggsave("./images2/iidcolsbm_group_trim.png", p_group, width = 11, height = 7, dpi = 300)
 
  
  

@@ -16,14 +16,14 @@
 # Inputs (exported by py_workflow/cvae_analysis.ipynb):
 # - pydata/latentspace_cvae_10k_3.csv, pydata/latentspace_vae_10k_4.csv
 #
-# Outputs (used by all the following scripts):
+# Outputs:
 # - Rdata/xgv_cvae_3_reordered_filtered.csv, Rdata/xgv_vae_4_reordered_filtered.csv
-#   columns mu_k (means) and sig_k (VARIANCES gamma^2_k, despite the name)
+#   (used by all the following scripts): columns mu_k (means) and sig_k
+#   (VARIANCES gamma^2_k, despite the name)
+# - images2/plot_dimension.png (Figure 4)
 #
-# Notes:
-# - Figure 4 is not saved by the script (no ggsave).
-# - The couples of trips are sampled without a seed: the figure changes
-#   slightly from one run to the next.
+# Note: the couples of trips are sampled without a seed: the figure changes
+# slightly from one run to the next.
 #===============================================================================
 
 
@@ -94,7 +94,7 @@ sig2_vae <- as.matrix(exp(df_vae[,1:4+10]))
 # - VAE : original dimensions 4, 3, 1, 2 become 1, 2, 3, 4
 # - CVAE: original dimensions 1, 3, 2 become 1, 2, 3
 
-(bhattacharyya_1d(mu_vae[ord1,], mu_vae[ord2,], 
+p_dimension <- (bhattacharyya_1d(mu_vae[ord1,], mu_vae[ord2,], 
                   sig2_vae[ord1,], sig2_vae[ord2,]) |>
     as_tibble() %>% 
     rename("3" = logsig_1, "4" = logsig_2, "2" = logsig_3, "1" = logsig_4) %>% 
@@ -128,6 +128,8 @@ sig2_vae <- as.matrix(exp(df_vae[,1:4+10]))
      facet_wrap(~ Model, scale = "free_x") +
      xlab("Dimension") +
      theme_bw(base_size = 20))
+p_dimension
+ggsave("./images2/plot_dimension.png", p_dimension, width = 14, height = 6, dpi = 300)
 
 
 #===============================================================================

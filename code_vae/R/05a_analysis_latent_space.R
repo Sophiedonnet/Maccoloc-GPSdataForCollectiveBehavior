@@ -15,8 +15,7 @@
 # - Rdata/xgv_100_14-18.csv (02_merge_xgv.R): hourly positions of each trip
 # - Rdata/xgv_cvae_3_reordered_filtered.csv (03_computing_bc.R)
 #
-# Note: the figures are saved in ../figures/ (outside code_vae/R); the ggsave
-# of plot_traj_mu.png is commented out.
+# Outputs: images2/plot_traj_mu.png and images2/plot_traj_sig.png
 #===============================================================================
 
 #===============================================================================
@@ -53,13 +52,13 @@ mu_names <- c(
 # The latent representations are joined to the hourly positions by trip
 # (maree); 492264 / 24 = 20511 trips of 24 hourly positions.
 
-df_traj %>% left_join(df_cvae %>% mutate(`...1` = `...1` + 1), by = "maree") %>% 
+p_traj_mu <- df_traj %>% left_join(df_cvae %>% mutate(`...1` = `...1` + 1), by = "maree") %>% 
   #filter(sig_2 >= .2) %>% 
   mutate(h = rep(seq(24), times = 492264/24)) %>% 
   #  mutate(Group = factor(LETTERS[Group], levels = LETTERS[1:5])) %>% 
   na.omit() %>% 
   pivot_longer(cols = starts_with("mu"), names_to = "Dim", values_to = "mu") %>% 
-  mutate(Dim = factor(Dim, labels = c("mu_1", "mu_2", "mu_3"))) %>% 
+  mutate(Dim = factor(Dim, labels = mu_names)) %>% 
   ggplot(aes(x = x, y = y, col = mu, group = maree)) + 
   annotation_map(map = fortify(maps::map("france", xlim = c(-5.3, -3.6), ylim = c(47, 48.3)))) +
   geom_path(alpha = .1) + 
@@ -74,23 +73,24 @@ df_traj %>% left_join(df_cvae %>% mutate(`...1` = `...1` + 1), by = "maree") %>%
 
 
 
-#ggsave("../figures/plot_traj_mu.png")
+p_traj_mu
+ggsave("./images2/plot_traj_mu.png", p_traj_mu, width = 12.3, height = 3.79, dpi = 300)
 
 # Bottom of Figure 7: colour = gamma^2_k (sig_k are variances)
 
-df_traj %>% left_join(df_cvae %>% mutate(`...1` = `...1` + 1), by = "maree") %>% 
+p_traj_sig <- df_traj %>% left_join(df_cvae %>% mutate(`...1` = `...1` + 1), by = "maree") %>% 
   #filter(sig_2 >= .2) %>% 
   mutate(h = rep(seq(24), times = 492264/24)) %>% 
   #  mutate(Group = factor(LETTERS[Group], levels = LETTERS[1:5])) %>% 
   na.omit() %>% 
   pivot_longer(cols = starts_with("sig"), names_to = "Dim", values_to = "sig") %>% 
-  mutate(Dim = factor(Dim, labels = c("gamma^2_1", "gamma^2_2", "gamma^2_3"))) %>% 
+  mutate(Dim = factor(Dim, labels = c("gamma[1]^2", "gamma[2]^2", "gamma[3]^2"))) %>% 
   ggplot(aes(x = x, y = y, col = sig, group = maree)) + 
   annotation_map(map = fortify(maps::map("france", xlim = c(-5.3, -3.6), ylim = c(47, 48.3)))) +
   geom_path(alpha = .1) + 
   annotate("point", x = -4.28, y = 47.78, shape = 23, size = 6, fill = "red") +
   scale_colour_viridis_c(direction =  - 1) + 
-  facet_wrap(~ Dim) + 
+  facet_wrap(~ Dim, labeller = label_parsed) + 
   coord_equal() + xlab("Longitude") + ylab("Latitude") +
   labs(color=expression(gamma^2)) +
   theme_bw(base_size = 15) +
@@ -102,4 +102,5 @@ df_traj %>% left_join(df_cvae %>% mutate(`...1` = `...1` + 1), by = "maree") %>%
 
 
 
-ggsave("../figures/plot_traj_sig.png", width = 12.3, height = 3.79)
+p_traj_sig
+ggsave("./images2/plot_traj_sig.png", p_traj_sig, width = 12.3, height = 3.79, dpi = 300)

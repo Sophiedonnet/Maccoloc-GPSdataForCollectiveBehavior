@@ -550,7 +550,8 @@ p_groups <- ggplot(Mat_groups, aes(x = Group, y = navire, alpha = Prop, fill = G
   labs(y = "Vessel") +
   theme_minimal(base_size = 14, base_line_size = 0)
 
-p_meso + p_groups + plot_layout(widths = c(3, 1.2))
+p_meso + p_groups + plot_layout(widths = c(3, 1.2)) &
+  theme(legend.position = "none")
 ```
 
 ## Figure 11 -- Trajectories, latent space and income per group {#sec-fig-group}

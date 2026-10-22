@@ -1,240 +1,258 @@
 #===============================================================================
-# This script does the following
-# - Build quarterly graph from a fraction of all the imported proximity array 
-# - Fit a colSBM model on the data for each sub sample
-# - Export the fitted model for each sub sample
+# Bootstrap of the collective-behaviour analysis
+# (Appendix "Uncertainty quantification" of the paper)
+#
+# This script does the following:
+# 1. Build the 20 quarterly proximity graphs from the full data (reference)
+# 2. Generate N_boot bootstrap collections: for each quarter, keep a random
+#    fraction `frac` of the fishing days (sampling without replacement) and
+#    rebuild the proximity graph from these days only
+# 3. Fit an iid-colSBM on each bootstrap collection
+# 4. Check that the bootstrap collections (and fitted networks) are distinct
+# 5. Compare the bootstrap fits with the full-data fit:
+#    - distribution of the estimated number of blocks R_hat
+#    - mesoscale structure of one bootstrap sample per value of R_hat
+#    - ARI between bootstrap and full-data clusterings, per quarter
+#
+# Inputs (produced by 06_build_proximity_graph.R and 07b_...R):
+# - Rdata/bc_jour_cvae.rds : array (days x 33 x 33) of the Bhattacharyya
+#                            coefficients between the trajectories of two
+#                            vessels on the same day (NA if a vessel did not
+#                            fish that day)
+# - Rdata/ldates.rds       : dates corresponding to the first dimension
+# - Rdata/save_sbmfit/iidcolsbm_trim_round8.rds : colSBM fit on the full data
+#
+# Outputs (in `dir_boot`, one file per bootstrap replicate k):
+# - subnets_<frac>/sub_net_<k>.rds        : list(days, netlist) of replicate k
+# - fits_<frac>/iidcolsbm_trim_sub_net_<k>.rds : colSBM fit of replicate k
+#
+# Every step is skipped when its output file already exists, so the script
+# can be interrupted and re-run. Delete the files of a step to recompute it.
+#
+# Computing time: one colSBM fit takes from several minutes to more than an
+# hour depending on `nb_run`, `my_global_opts` and the number of cores.
+#
+# Note on the results of the first version of the paper: the files in
+# Rdata/save_colsbmfit_subsample/subnets_90/sub_net_1..34.Rdata contain an
+# object named `net_BCq8_trim` (the full-data networks) instead of
+# `sub_net_BCq8_trim`. The former estimation loop used `load()` and then
+# `sub_net_BCq8_trim`, i.e. an object left in the R session: the fits
+# res_iidcolsbm_subnets_90/iidcolsbm_trim_sub_net_1..30.rds were all
+# estimated on the same network collection. This script avoids the problem by
+# saving and reading each replicate with saveRDS()/readRDS() and by checking
+# (step 4) that the replicates differ.
 #===============================================================================
-rm(list=ls())
+
+rm(list = ls())
 library(tidyverse)
 library(lubridate)
-library(mclust)
+library(mclust)    # adjustedRandIndex()
 library(patchwork)
-library(colSBM)
-source(file='99_helper_functions.R')
-source(file='98_functions_resampling.R')
+library(colSBM)    # devtools::install_github("GrossSBM/colSBM")
+source(file = "99_helper_functions.R")
+source(file = "98_functions_resampling.R") # get_order*(), get_Ztrim(); needs graphclust
 
-threshold <-  0.8
-quantile   <- 0.8
 
+#===============================================================================
+# 0. Parameters
+#===============================================================================
+
+# Construction of the proximity graphs (same values as for the full data,
+# see 07_fit_colsbm_proxy_graphs.R): vessels b and b' are connected in a
+# quarter if the `quantile`-quantile of their daily BC is above `threshold`
+threshold <- 0.8
+quantile  <- 0.8
+
+# Bootstrap
+frac      <- 0.9   # fraction of the fishing days kept in each quarter
+N_boot    <- 30    # number of bootstrap replicates
+seed_boot <- 1234  # replicate k uses seed_boot + k (sub-sampling and fit)
+
+# colSBM options: same as for the reference fit on the full data
+# (Rdata/save_sbmfit/iidcolsbm_trim_round8.rds)
+nb_run <- 8
+my_global_opts <- list(nb_cores = 4,
+                       nb_models = 5,
+                       nb_init = 10,
+                       depth = 4,
+                       verbosity = 1,
+                       spectral_init = TRUE,
+                       Q_max = 7,
+                       plot_details = 1)
+
+# Output folders
+dir_boot    <- "Rdata/save_colsbm_bootstrap"
+dir_subnets <- file.path(dir_boot, paste0("subnets_", 100 * frac))
+dir_fits    <- file.path(dir_boot, paste0("fits_", 100 * frac))
+dir.create(dir_subnets, recursive = TRUE, showWarnings = FALSE)
+dir.create(dir_fits, recursive = TRUE, showWarnings = FALSE)
+
+file_subnet <- function(k) file.path(dir_subnets, paste0("sub_net_", k, ".rds"))
+file_fit    <- function(k) file.path(dir_fits, paste0("iidcolsbm_trim_sub_net_", k, ".rds"))
+
+
+#===============================================================================
+# 1. Data and construction of the quarterly proximity graphs
+#===============================================================================
 
 bc_jour_cvae_ar <- readRDS("Rdata/bc_jour_cvae.rds")
 ldates <- readRDS("Rdata/ldates.rds")
+
+# The 20 quarters, ordered by year then quarter: (1, 2014), (2, 2014), ...
 trim_year <- expand.grid(seq(4), seq(2014, 2018)) %>%
   rename(Trim = Var1, Year = Var2)
+net_id <- paste0(trim_year$Trim, "_", trim_year$Year)
 
-#===============================================================================
-# Build a list of vector of boolean. TRUE if vessels [i] has fishing days in 
-# quarter [[k]]
-#===============================================================================
-file_trim_peche = "./Rdata/trim_peche.rds"
-if (! file.exists(file_trim_peche)){
-trim_peche <- 
-   lapply(seq(20),
-          function(t) {
-            id <- which(
-              year(ldates) == trim_year$Year[t] &
-              (((month(ldates) + 3) %%4) + 1) == trim_year$Trim[t])
-            net <- 1*(
-              apply(
-                bc_jour_cvae_ar[id,,], 
-                c(2,3), 
-                "quantile", 
-                na.rm = TRUE, probs = quantile) > threshold)           
-            trim_peche_t <- ! is.na(diag(net))
-            return(trim_peche_t)
-          })
-saveRDS(trim_peche, file_trim_peche)
+# Indices (in ldates) of the days of quarter t
+days_of_quarter <- lapply(seq(20), function(t) {
+  which(year(ldates) == trim_year$Year[t] &
+          (((month(ldates) + 3) %% 4) + 1) == trim_year$Trim[t])
+})
+
+# Proximity graph built from the days `days`:
+# - A[b, b'] = 1 if the `quantile`-quantile of BC(b, b') over the days is
+#   larger than `threshold`. NA if b and b' never fished the same day.
+# - vessels that did not fish during these days (NA diagonal) are removed,
+#   rows/columns are named by the vessel number (1..33)
+build_network <- function(days) {
+  net <- 1 * (apply(bc_jour_cvae_ar[days, , ], c(2, 3), "quantile",
+                    na.rm = TRUE, probs = quantile) > threshold)
+  rownames(net) <- colnames(net) <- seq(33)
+  net <- net[!is.na(diag(net)), !is.na(diag(net))]
+  diag(net) <- 0
+  net
 }
-# Construct collection of full network
-net_BCq8_trim <-
-  lapply(seq(20),
-         function(t) {
-           id <- which(
-             year(ldates) == trim_year$Year[t] &
-               (((month(ldates) + 3) %%4) + 1) == trim_year$Trim[t])
-           
-           net <- 1*(
-             apply(
-               bc_jour_cvae_ar[id,,],
-               c(2,3),
-               "quantile",
-               na.rm = TRUE, probs = quantile) > threshold)
-           rownames(net) <- seq(33)
-           colnames(net) <- seq(33)
-           net <- net[! is.na(diag(net)), ! is.na(diag(net))]
-           diag(net) <- 0
-           net
-         })
 
 
 #===============================================================================
-# Create bootstrap data  
+# 2. Reference: networks of the full data and colSBM fit
 #===============================================================================
 
-N_sub_sampl <- 30
+net_BCq8_trim <- lapply(days_of_quarter, build_network)
 
-#---------- Create subnet 
-# for (k in 1:(N_sub_sampl)) {
-#   print(k)
-#   file_sim=paste0("Rdata/save_colsbmfit_subsample/subnets_90/sub_net_",k,".Rdata")
-#   sub_net_BCq8_trim  <- list()
-#   
-#   if (! file.exists(file_sim)) {
-#     for (t in 1:20){
-#       id.t <- which(year(ldates) == trim_year$Year[t] &
-#                  (((month(ldates) + 3) %%4) + 1) == trim_year$Trim[t])
-#       l_id.t <- length(id.t)
-#       sub_id.t <- sample(id.t,floor(l_id.t*0.9))
-#       sub_net.t <- 1*(apply(
-#                  bc_jour_cvae_ar[sub_id.t,,],
-#                  c(2,3),
-#                  "quantile",
-#                  na.rm = TRUE, probs = quantile) > threshold)
-#       #trim_peche.t <- ! is.na(diag(sub_net.t))
-#       rownames(sub_net.t) <- seq(33)
-#       colnames(sub_net.t) <- seq(33)
-#       sub_net.t <-sub_net.t[! is.na(diag(sub_net.t)), ! is.na(diag(sub_net.t))]
-#       diag(sub_net.t) <- 0
-#       sub_net_BCq8_trim[[t]] <- sub_net.t
-#       #sub_trim_peche[[t]] <- trim_peche.t 
-#       }
-#    save(sub_net_BCq8_trim,file=file_sim)
-#   }
-#  
-# }
-#===============================================================================
-#---------- estim iid col sbm on bootstrap data
-#===============================================================================
-
-# my_global_opts = list(nb_cores = 4,
-#                       nb_models = 5,
-#                       nb_init = 10,
-#                       depth = 4,
-#                       verbosity = 1,
-#                       spectral_init = TRUE,
-#                       Q_max = 7,
-#                       plot_details = 1)
-#                   
-# for (k in 1:N_sub_sampl){
-#    
-#    print(paste("sub_sampl=",k))
-#    load(file=paste0("Rdata/save_colsbmfit_subsample/subnets_90/sub_net_",k,".Rdata"))
-#    file_res = paste0("Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/iidcolsbm_trim_sub_net_",k,".rds")
-# #   
-# # 
-#    if (! file.exists(file_res)) {
-#      iidcol_trim_clust <- colSBM::estimate_colSBM(netlist = sub_net_BCq8_trim,
-#                                                                  colsbm_model = "iid",
-#                                                                  net_id =  trim_year %>% transmute(trimyear = paste0(Trim, "_", Year)) %>% pull(trimyear),
-#                                                                  nb_run = 8,
-#                                                                  directed = FALSE, global_opts=my_global_opts)
-#      saveRDS(iidcol_trim_clust, file_res)
-#      rm(iidcol_trim_clust)
-#      gc()  
-#    }
-# # 
-# }
+bestfit_full <- readRDS("Rdata/save_sbmfit/iidcolsbm_trim_round8.rds")$best_fit
+# Sanity check: the reference fit was estimated on these networks
+stopifnot(isTRUE(all.equal(
+  lapply(net_BCq8_trim, unname),
+  lapply(bestfit_full$A, function(A) { A <- unname(A); A[A == -1] <- NA; A }))))
 
 
 #===============================================================================
-#  Exploitation résultats. 
+# 3. Generate the bootstrap collections of networks
 #===============================================================================
+# For replicate k and each quarter, floor(frac * n_days) days are sampled
+# without replacement among the n_days fishing days of the quarter. Removing
+# days removes opportunities for two vessels to fish the same day, hence
+# more NA in the bootstrap networks.
 
-#================ Kestim
-Kestim = rep(0,N_sub_sampl)
-for (k in 1:N_sub_sampl){
-  print(k)
-  res_k <- readRDS(paste0("Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/iidcolsbm_trim_sub_net_",k,".rds"))
-  Kestim[k] <- res_k$best_fit$nb_clusters
+for (k in seq(N_boot)) {
+  if (!file.exists(file_subnet(k))) {
+    set.seed(seed_boot + k)
+    days <- lapply(days_of_quarter, function(id) sort(sample(id, floor(frac * length(id)))))
+    netlist <- lapply(days, build_network)
+    saveRDS(list(days = days, netlist = netlist), file_subnet(k))
   }
-table(Kestim)/30*100
-
-
-
-#================ Plot resulting structure
-
-#=========  Full data estimation: used as a reference 
-file_res_full = paste0("Rdata/save_sbmfit/iidcolsbm_trim_round8.rds")
-iidcol_trim_clust_full <- readRDS(file_res_full)
-bestfit_full <- iidcol_trim_clust_full$best_fit
-
-
-file_res_full_saintClair = paste0("Rdata/save_sbmfit/iidcolsbm_trim.rds")
-iidcol_trim_clust_full_saintClair <- readRDS(file_res_full_saintClair)
-bestfit_full_saintClair <- iidcol_trim_clust_full_saintClair
-
-o_saintClair = get_order(bestfit_full_saintClair )
-o_full  = get_order_withref(fit = bestfit_full, fit_ref=bestfit_full_saintClair,order_ref=o_saintClair)
-
-#--- prepare plot for k6 
-k6 = sample((1:N_sub_sampl)[Kestim==6],1)
-file_res_k6 = paste0("Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/iidcolsbm_trim_sub_net_",k6,".rds")
-res_k6 <- readRDS(file_res_k6)
-o_k6 <- get_order_withref(res_k6$best_fit,bestfit_full,o_full)
-
-
-#---  prepare plot for k7
-k7 = sample((1:N_sub_sampl)[Kestim==7],1)
-file_res_k7 = paste0("Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/iidcolsbm_trim_sub_net_",k7,".rds")
-res_k7 <- readRDS(file_res_k7)
-o_k7 <- get_order_withref(res_k7$best_fit,bestfit_full,o_full)
-
-
-
-p_k6 <- plot(res_k6$best_fit, type = "graphon",ord=o_k6)  + theme(plot.title = element_text(size = 12),legend.position = "none") + ggtitle(bquote(m == .(k6) ~ "," ~  hat(R) == 6))
-p_k7 <- plot(res_k7$best_fit, type = "graphon",ord=o_k7)  + theme(plot.title = element_text(size = 12),legend.position = "none") + ggtitle(bquote(m == .(k7)~ "," ~  hat(R) == 7))
- 
-
-
-
-
-############## recup des Zfull pour tous les neouds avec des NA si le neoud n'est pas présent. 
-Z_trim_full <- get_Ztrim(bestfit_full)
-
-
-########### for all subsample
-
-N_sub_sampl = 30
-Ari_estim <- matrix(0,20,N_sub_sampl) 
-for (k in 1:N_sub_sampl){
-   file_res = paste0("Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/iidcolsbm_trim_sub_net_",k,".rds")
-   res_k <- readRDS(file_res)
-   res_k <- res_k$best_fit
-   Z_trim <- get_Ztrim(res_k)
-  
-   Ari_estim[,k] <- sapply(1:20,function(t){
-     Z.t.full <- Z_trim_full[,t]
-     Z.t <- Z_trim[,t]
-     w.t <- which(is.na(Z.t))
-     return(adjustedRandIndex(Z.t.full[-w.t],Z.t[-w.t]))
-   })
 }
 
-ARI_df <- as.data.frame(c(Ari_estim))
-names(ARI_df)=c('ARI')
 
-mu  <- mean(ARI_df$ARI, na.rm = TRUE)
+#===============================================================================
+# 4. Fit an iid-colSBM on each bootstrap collection
+#===============================================================================
 
-p_hist_ARI <- ggplot(ARI_df,aes(x=ARI))
-p_hist_ARI <- p_hist_ARI +geom_histogram(aes(y = after_stat(count / sum(count))),binwidth = 0.03,fill = "#4C72B0",
-                                       color = "white")
-p_hist_ARI <- p_hist_ARI +scale_x_continuous(limits = c(0, 1))+ylab("Frequency")
-p_hist_ARI <- p_hist_ARI +  geom_vline(
-  xintercept = mu,
-  color = "#DD8452",
-  linewidth = 1.1,
-  linetype = "solid"
-) +theme_minimal() + annotate("text", x = mu-0.15, y = Inf, label = "Mean of the ARI",
-                              vjust = 2, color = "#DD8452")
+for (k in seq(N_boot)) {
+  if (!file.exists(file_fit(k))) {
+    message("Bootstrap replicate ", k, "/", N_boot)
+    sub_net <- readRDS(file_subnet(k))$netlist
+    set.seed(seed_boot + k)
+    fit_k <- colSBM::estimate_colSBM(netlist = sub_net,
+                                     colsbm_model = "iid",
+                                     net_id = net_id,
+                                     nb_run = nb_run,
+                                     directed = FALSE,
+                                     global_opts = my_global_opts)
+    saveRDS(fit_k, file_fit(k))
+    rm(fit_k)
+    gc()
+  }
+}
 
 
+#===============================================================================
+# 5. Checks
+#===============================================================================
+
+boot_fits <- lapply(seq(N_boot), function(k) readRDS(file_fit(k))$best_fit)
+
+# Each fit was estimated on the networks of its own replicate
+fit_networks <- lapply(boot_fits, function(f) {
+  lapply(f$A, function(A) { A <- unname(A); A[A == -1] <- NA; A })
+})
+for (k in seq(N_boot)) {
+  stopifnot(isTRUE(all.equal(lapply(readRDS(file_subnet(k))$netlist, unname),
+                             fit_networks[[k]])))
+}
+# The replicates are all different (and different from the full data)
+stopifnot(length(unique(fit_networks)) == N_boot)
+stopifnot(!any(sapply(fit_networks, identical, lapply(net_BCq8_trim, unname))))
 
 
-final_plot <- (p_k6 + p_k7) / 
-  (plot_spacer() + p_hist_ARI + plot_spacer()) +
-  plot_layout(heights = c(1, 1), widths = c(1, 2, 1))
+#===============================================================================
+# 6. Results
+#===============================================================================
 
+#------------- Number of blocks selected on each bootstrap replicate
+R_hat <- sapply(boot_fits, function(f) f$nb_clusters)
+table(R_hat) / N_boot * 100
+
+
+#------------- Mesoscale structures: one replicate per value of R_hat
+# The blocks are ordered as for the full-data fit (get_order), and the blocks
+# of each replicate are permuted to minimise the L2 distance between its
+# graphon and the one of the full-data fit.
+o_full <- get_order(bestfit_full)
+
+plot_boot <- function(m) {
+  f <- boot_fits[[m]]
+  o <- get_order_withref(fit = f, fit_ref = bestfit_full, order_ref = o_full)
+  plot(f, type = "graphon", ord = o) +
+    ggtitle(bquote(m == .(m) ~ "," ~ hat(R) == .(f$nb_clusters))) +
+    theme(plot.title = element_text(size = 12), legend.position = "none")
+}
+# first replicate for each value of R_hat, most frequent value first
+R_freq <- sort(table(R_hat), decreasing = TRUE)
+m_show <- sapply(as.integer(names(R_freq)), function(r) which(R_hat == r)[1])
+
+
+#------------- ARI between bootstrap and full-data clusterings
+# For replicate k and quarter t, the ARI is computed on the vessels present
+# in both the full-data and the bootstrap networks of quarter t.
+Z_trim_full <- get_Ztrim(bestfit_full) # 33 x 20 matrix of blocks (NA = absent)
+
+ARI <- sapply(boot_fits, function(f) {
+  Z_trim <- get_Ztrim(f)
+  sapply(seq(20), function(t) {
+    keep <- !is.na(Z_trim[, t]) & !is.na(Z_trim_full[, t])
+    adjustedRandIndex(Z_trim_full[keep, t], Z_trim[keep, t])
+  })
+})
+summary(c(ARI))
+
+p_hist_ARI <- ggplot(tibble(ARI = c(ARI)), aes(x = ARI)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), binwidth = 0.03,
+                 fill = "#4C72B0", color = "white") +
+  geom_vline(xintercept = mean(ARI, na.rm = TRUE), color = "#DD8452",
+             linewidth = 1.1) +
+  annotate("text", x = mean(ARI, na.rm = TRUE) - 0.15, y = Inf, vjust = 2,
+           label = "Mean of the ARI", color = "#DD8452") +
+  scale_x_continuous(limits = c(0, 1)) +
+  ylab("Frequency") +
+  theme_minimal()
+
+
+#------------- Figure of the appendix (bootstrap_results.png)
+p_struct <- lapply(m_show, plot_boot)
+final_plot <- wrap_plots(p_struct, nrow = 1) /
+  (plot_spacer() + p_hist_ARI + plot_spacer() + plot_layout(widths = c(1, 2, 1)))
 final_plot
-
-
-summary(ARI_df$ARI)
+# ggsave(file.path(dir_boot, paste0("bootstrap_results_", 100 * frac, ".png")),
+#        final_plot, width = 9, height = 8)

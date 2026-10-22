@@ -728,20 +728,31 @@ array(unlist(trim_matrices), dim = c(33, 33, 20)) |>
 
 *Original: `07c_fit_colsbm_proxy_graphs_resampling.R`; file
 `bootstrap_results.png`.* colSBM fitted on 30 collections of networks built
-from 90% of the days of each quarter. Top: mesoscale structure of two
-bootstrap samples ($m = 29$ with $\hat R = 6$ and $m = 23$ with $\hat R = 7$,
-as in the paper), with groups aligned on the full-data fit by minimising the
-$L_2$ distance between graphons. Bottom: ARI between the bootstrap and the
-full-data clusterings, for each sample and each quarter.
+from 90% of the days of each quarter (fits saved in
+`Rdata/save_colsbm_bootstrap/fits_90/`). Top: mesoscale structure of one
+bootstrap sample per value of $\hat R$, with groups aligned on the full-data
+fit by minimising the $L_2$ distance between graphons. Bottom: ARI between the
+bootstrap and the full-data clusterings, for each sample and each quarter.
+
+::: {.callout-important}
+The bootstrap fits of the first version of the paper
+(`Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/`, fits 1 to 30)
+were all estimated on the same network collection (see the header of
+`07c_fit_colsbm_proxy_graphs_resampling.R`). The fits used here were
+recomputed with the corrected script, one distinct sub-sample per replicate.
+:::
 
 ```{r}
 #| label: bootstrap
 N_sub <- 30
 boot_fits <- lapply(seq(N_sub), function(k) readRDS(sprintf(
-  "./Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/iidcolsbm_trim_sub_net_%d.rds", k))$best_fit)
+  "./Rdata/save_colsbm_bootstrap/fits_90/iidcolsbm_trim_sub_net_%d.rds", k))$best_fit)
 
 R_hat <- sapply(boot_fits, \(f) f$nb_clusters)
 round(100 * prop.table(table(R_hat)))
+# first replicate for each value of R_hat, most frequent value first
+R_freq <- sort(table(R_hat), decreasing = TRUE)
+m_show <- sapply(as.integer(names(R_freq)), function(r) which(R_hat == r)[1])
 
 Z_full <- get_Ztrim(iidcolsbm_trim)
 ARI <- sapply(boot_fits, function(f) {
@@ -756,7 +767,7 @@ summary(c(ARI))
 
 ```{r}
 #| label: fig-bootstrap
-#| fig-cap: "Top: estimated mesoscale structures obtained from two bootstrap samples, with R = 6 (left) and R = 7 (right). Bottom: histogram of the adjusted Rand index (ARI) between bootstrap and full-data clusterings."
+#| fig-cap: "Top: estimated mesoscale structures obtained from one bootstrap sample per selected number of blocks R. Bottom: histogram of the adjusted Rand index (ARI) between bootstrap and full-data clusterings."
 #| fig-width: 9
 #| fig-height: 8
 plot_boot <- function(m) {
@@ -777,7 +788,7 @@ p_hist_ARI <- ggplot(tibble(ARI = c(ARI)), aes(x = ARI)) +
   ylab("Frequency") +
   theme_minimal()
 
-(plot_boot(29) + plot_boot(23)) /
+wrap_plots(lapply(m_show, plot_boot), nrow = 1) /
   (plot_spacer() + p_hist_ARI + plot_spacer() + plot_layout(widths = c(1, 2, 1)))
 ```
 
@@ -794,7 +805,7 @@ The intermediate files read above are produced by the following steps
 | Order the dimensions | `03_computing_bc.R` | `Rdata/xgv_{cvae_3,vae_4}_reordered_filtered.csv` |
 | BC between vessels, same / adjacent days | `06_build_proximity_graph.R` | `Rdata/bc_jour_cvae.rds`, `bc_lag_cvae.rds`, `ldates.rds` |
 | Quarterly graphs and colSBM fit | `07_fit_colsbm_proxy_graphs.R`, `07b_...R` | `Rdata/trim_peche.rds`, `Rdata/save_sbmfit/iidcolsbm_trim_round8.rds` |
-| Bootstrap of the colSBM | `07c_fit_colsbm_proxy_graphs_resampling.R` | `Rdata/save_colsbmfit_subsample/` |
+| Bootstrap of the colSBM | `07c_fit_colsbm_proxy_graphs_resampling.R` | `Rdata/save_colsbm_bootstrap/` |
 | Catch data of the trips | `09_extract_xgv_capture.R` | `Rdata/sacrois_xgv_capt.csv` |
 | Reconstructions for Figure A1 | `py_workflow/export_reconstruction.py` | `pydata/reconstruction_cvae3.csv` |
 

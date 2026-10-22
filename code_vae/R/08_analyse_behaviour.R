@@ -87,6 +87,14 @@ trim_matrices <- lapply(
 # Note: get_Ztrim_relabel also swaps the labels of the two largest groups
 # (and of their most connected groups) in some quarters, so that vessel 1 is
 # never in the one of the two largest groups it belongs to less often.
+# Why: the two large communities (each with its most connected group) have
+# nearly symmetric parameters (pi and alpha), so within a quarter the label
+# each community receives is nearly arbitrary (practical non-identifiability;
+# formally, iid-colSBM labels can only be permuted in all quarters at once).
+# Without the swap, vessel 1 would be in the other large community in 7 of
+# the 20 quarters, together with its whole community: the share of
+# (vessel, quarter) pairs where a vessel is on its usual side goes from 0.67
+# (raw labels) to 0.94 (after the swap).
 # Z_trim_map: most frequent group of each vessel over the quarters.
 best_ord = get_order(iidcolsbm_trim) 
 Z_trim <- get_Ztrim_relabel(iidcolsbm_trim)

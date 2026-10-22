@@ -1,11 +1,25 @@
 #===============================================================================
+# Latent representations of 3 selected vessels
+# (Figures 5 and 6 of the paper, files plot_ts_mu.png and
+#  plot_traj_latent_2-6-19_new.png)
+#
 # This script does the following
-# - Import the reorder and filted latent representation dataset of vae4 and 
+# - Import the reorder and filted latent representation dataset of vae4 and
 # cvae3
 # - Import the trajectory dataset of XGV
 # - Standardized the geographical coordinates
-# - Selects 3 vessels
-# - Plot the latent space, trajectory and times series of those 3 vessels
+# - Selects 3 vessels (2, 6 and 19)
+# - Figure 5: time series of the latent distributions of the 3 vessels
+# - Figure 6: trajectories and latent space of the 3 vessels
+#
+# Inputs:
+# - Rdata/xgv_100_14-18.csv (02_merge_xgv.R): hourly positions of each trip
+# - Rdata/xgv_{cvae_3,vae_4}_reordered_filtered.csv (03_computing_bc.R)
+#
+# Notes:
+# - The vessels are numbered 1..33 in their order of appearance in df_cvae;
+#   this numbering is used in all the figures of the paper.
+# - The figures are not saved by the script (no ggsave).
 #===============================================================================
 
 #===============================================================================
@@ -20,6 +34,8 @@ source("./99_helper_functions.R")
 #===============================================================================
 # Import and filter dataset
 #===============================================================================
+# Trips on week days only (wday 2..6 = Monday..Friday), and one trip removed
+# (12097796), as for the training of the VAEs
 df_traj <- read_csv(file = "./Rdata/xgv_100_14-18.csv")
 df_traj <- df_traj %>% filter(wday(time) %in% c(2,3,4,5,6)) |>
   filter(maree != 12097796)
@@ -28,13 +44,18 @@ df_vae <- read_csv(file = "./Rdata/xgv_vae_4_reordered_filtered.csv")
 
 navire_id <- unique(df_cvae$navire)
 
+# The 3 vessels shown in the paper
 b = 2
 bp = 6
 bpp = 19
 
 #===============================================================================
-# Plotting the latent distribution time series
+# Plotting the latent distribution time series (Figure 5)
 #===============================================================================
+# One panel per vessel (b, bp, bpp), one row per latent dimension: mean mu of
+# the variational distribution of each trip, and band mu +/- z * gamma, with
+# gamma = sqrt(sig) the standard deviation.
+# Note: z = qnorm(.95) ~ 1.645 here, while the caption of the paper states 1.96.
 df_vae %>% filter(navire == navire_id[b]) %>% 
   mutate(model = "VAE") %>%
   bind_rows(df_cvae %>% filter(navire == navire_id[b]) %>% 
@@ -101,10 +122,15 @@ df_vae %>% filter(navire == navire_id[b]) %>%
 
 
 #===============================================================================
-# Plotting the latent mean and the standardized trajectories
+# Plotting the latent mean and the standardized trajectories (Figure 6)
 #===============================================================================
+# Left: trajectories of the 3 vessels, in standardized coordinates (offset in
+# longitude and latitude from the harbour at (-4.28, 47.78), converted to
+# units of 10 km, see coord2std).
+# Right: latent means of their trips, x = mu_1, y = mu_2, size = mu_3.
+# Trips of June 2015 and December 2015 are highlighted.
 
-df_traj <- df_traj |> 
+df_traj <- df_traj |>
   mutate(x_std = coord2std(x, -4.28),
         y_std = coord2std(y, 47.78)) 
 
@@ -115,7 +141,7 @@ boat <- c(2, 6, 19)
            #navire = as_factor(navire),
            month = as_factor(month(time)),
            year = year(time)) %>% 
-    mutate(h = rep(seq(24), nrow(.)/24)) %>% 
+    mutate(h = rep(seq(24), nrow(.)/24)) %>% # hour of the trip (24 positions per trip)
     #mutate(metier = df_cvae$metier[df_cvae$maree == maree]) %>% 
     mutate(maree = as_factor(maree)) %>% 
     mutate(navire = case_match(navire,

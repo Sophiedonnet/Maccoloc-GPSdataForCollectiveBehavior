@@ -1,9 +1,22 @@
 #===============================================================================
+# Trajectories coloured by their latent parameters
+# (Figure 7 of the paper, files plot_traj_mu.png and plot_traj_sig.png)
+#
 # This script does the following
 # - Import the reorder and filted latent representation dataset of cvae3
 # - Import the trajectory dataset of XGV
 # - Plot the trajectories, with colour depending on the parameters of their
-# latent variational distribution
+# latent variational distribution:
+#   - top of Figure 7: mean mu_k of each dimension k
+#   - bottom of Figure 7: variance gamma^2_k of each dimension k
+#   The red lozenge is the harbour.
+#
+# Inputs:
+# - Rdata/xgv_100_14-18.csv (02_merge_xgv.R): hourly positions of each trip
+# - Rdata/xgv_cvae_3_reordered_filtered.csv (03_computing_bc.R)
+#
+# Note: the figures are saved in ../figures/ (outside code_vae/R); the ggsave
+# of plot_traj_mu.png is commented out.
 #===============================================================================
 
 #===============================================================================
@@ -15,6 +28,8 @@ library(matrixStats)
 library(patchwork)
 source("./99_helper_functions.R")
 
+# Trips on week days only, and one trip removed (12097796), as for the
+# training of the VAEs
 df_traj <- read_csv(file = "./Rdata/xgv_100_14-18.csv")
 df_traj <- df_traj %>% filter(wday(time) %in% c(2,3,4,5,6)) |>
   filter(maree != 12097796)
@@ -34,6 +49,9 @@ mu_names <- c(
   "mu[3]"
 )
 
+# Top of Figure 7: colour = mu_k.
+# The latent representations are joined to the hourly positions by trip
+# (maree); 492264 / 24 = 20511 trips of 24 hourly positions.
 
 df_traj %>% left_join(df_cvae %>% mutate(`...1` = `...1` + 1), by = "maree") %>% 
   #filter(sig_2 >= .2) %>% 
@@ -58,6 +76,7 @@ df_traj %>% left_join(df_cvae %>% mutate(`...1` = `...1` + 1), by = "maree") %>%
 
 #ggsave("../figures/plot_traj_mu.png")
 
+# Bottom of Figure 7: colour = gamma^2_k (sig_k are variances)
 
 df_traj %>% left_join(df_cvae %>% mutate(`...1` = `...1` + 1), by = "maree") %>% 
   #filter(sig_2 >= .2) %>% 

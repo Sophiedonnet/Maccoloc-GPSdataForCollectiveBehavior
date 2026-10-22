@@ -736,7 +736,7 @@ bootstrap and the full-data clusterings, for each sample and each quarter.
 
 ::: {.callout-important}
 The bootstrap fits of the first version of the paper
-(`Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/`, fits 1 to 30)
+(now in `archive/Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/`, fits 1 to 30)
 were all estimated on the same network collection (see the header of
 `07c_fit_colsbm_proxy_graphs_resampling.R`). The fits used here were
 recomputed with the corrected script, one distinct sub-sample per replicate.
@@ -805,7 +805,7 @@ The intermediate files read above are produced by the following steps
 | Export latent representations, generate grid trajectories | `py_workflow/cvae_analysis.ipynb` | `pydata/latentspace_*.csv`, `generated_traj_cvae3.csv` |
 | Order the dimensions | `03_computing_bc.R` | `Rdata/xgv_{cvae_3,vae_4}_reordered_filtered.csv` |
 | BC between vessels, same / adjacent days | `06_build_proximity_graph.R` | `Rdata/bc_jour_cvae.rds`, `bc_lag_cvae.rds`, `ldates.rds` |
-| Quarterly graphs and colSBM fit | `07_fit_colsbm_proxy_graphs.R`, `07b_...R` | `Rdata/trim_peche.rds`, `Rdata/save_sbmfit/iidcolsbm_trim_round8.rds` |
+| Quarterly graphs and colSBM fit | `07b_fit_colsbm_proxy_graphs_replicate_results.R` | `Rdata/trim_peche.rds`, `Rdata/save_sbmfit/iidcolsbm_trim_round8.rds` |
 | Bootstrap of the colSBM | `07c_fit_colsbm_proxy_graphs_resampling.R` | `Rdata/save_colsbm_bootstrap/` |
 | Catch data of the trips | `09_extract_xgv_capture.R` | `Rdata/sacrois_xgv_capt.csv` |
 | Reconstructions for Figure A1 | `py_workflow/export_reconstruction.py` | `pydata/reconstruction_cvae3.csv` |

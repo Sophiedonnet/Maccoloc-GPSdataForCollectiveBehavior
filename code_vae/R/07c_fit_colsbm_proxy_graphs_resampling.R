@@ -32,8 +32,9 @@
 # Computing time: one colSBM fit takes from several minutes to more than an
 # hour depending on `nb_run`, `my_global_opts` and the number of cores.
 #
-# Note on the results of the first version of the paper: the files in
-# Rdata/save_colsbmfit_subsample/subnets_90/sub_net_1..34.Rdata contain an
+# Note on the results of the first version of the paper (now in
+# archive/Rdata/save_colsbmfit_subsample/): the files
+# subnets_90/sub_net_1..34.Rdata contain an
 # object named `net_BCq8_trim` (the full-data networks) instead of
 # `sub_net_BCq8_trim`. The former estimation loop used `load()` and then
 # `sub_net_BCq8_trim`, i.e. an object left in the R session: the fits
@@ -58,8 +59,8 @@ source(file = "98_functions_resampling.R") # get_order*(), get_Ztrim(); needs gr
 #===============================================================================
 
 # Construction of the proximity graphs (same values as for the full data,
-# see 07_fit_colsbm_proxy_graphs.R): vessels b and b' are connected in a
-# quarter if the `quantile`-quantile of their daily BC is above `threshold`
+# see 07b_...R): vessels b and b' are connected in a quarter if the
+# `quantile`-quantile of their daily BC is above `threshold`
 threshold <- 0.8
 quantile  <- 0.8
 
@@ -68,8 +69,8 @@ frac      <- 0.9   # fraction of the fishing days kept in each quarter
 N_boot    <- 30    # number of bootstrap replicates
 seed_boot <- 1234  # replicate k uses seed_boot + k (sub-sampling and fit)
 
-# colSBM options: same as for the reference fit on the full data
-# (Rdata/save_sbmfit/iidcolsbm_trim_round8.rds)
+# colSBM options of the bootstrap fits. They differ slightly from the options
+# of the full-data fit (07b_...R: nb_models = 3, nb_cores = 1)
 nb_run <- 8
 my_global_opts <- list(nb_cores = 4,
                        nb_models = 5,

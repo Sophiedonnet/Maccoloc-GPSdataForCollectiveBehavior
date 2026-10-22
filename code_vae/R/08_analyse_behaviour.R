@@ -1,12 +1,33 @@
 rm(list=ls())
 #===============================================================================
+# Individual and collective behaviours
+# (Figures 9, 10 and A2 of the paper)
+#
 # This script does the following
 # - Import fitted colSBM model
 # - Import latent space of cvae3
-# - Plot the 20 quarterly proximity graphs
+# - Plot the 20 quarterly proximity graphs (Figure A2)
 # - Compute DSI and GSI for individual
-# - Plot DSI and GSI for individual
-# - Plot mesoscale structure and groups
+# - Plot DSI and GSI for individual (Figure 9)
+# - Plot mesoscale structure and groups (Figure 10)
+#
+# Inputs:
+# - Rdata/xgv_cvae_3_reordered_filtered.csv (03_computing_bc.R)
+# - Rdata/trim_peche.rds (07b_...R): for each quarter,
+#   the vessels (1..33) that fished during the quarter
+# - Rdata/bc_lag_cvae.rds (06_build_proximity_graph.R): BC between the trip
+#   of vessel b on day t and the trip of vessel b' on day t+1, for all couples
+#   (b, b'), array (days x 33 x 33)
+# - Rdata/save_sbmfit/iidcolsbm_trim_round8.rds (07b_...R): colSBM fit on the
+#   20 quarterly proximity graphs
+#
+# Outputs (in images2/):
+# - proxy_graph_trim_nous.png      : Figure A2 (proxy_graph_trim.png in the paper)
+# - bc_group_colsbm_trim_cvae.png  : Figure 9
+# - iidcolsbm_group_trim.png       : Figure 10
+#
+# The groups are the blocks of the colSBM, relabelled A, B, ... with the
+# ordering functions of 98_functions_resampling.R.
 #===============================================================================
 
 
@@ -31,37 +52,20 @@ df_cvae$time <- as.Date(df_cvae$time)
 trim_peche <- readRDS("./Rdata/trim_peche.rds")
 bc_lag_cvae_ar <- readRDS("./Rdata/bc_lag_cvae.rds")
 
-#------------ colsbm 
-#estim <- 'saintclair'
-estim <- 'nous'
-#estim <- 'nousQ5'
+#------------ colsbm
+# Selected model of the colSBM fit of 07b_...R (6 groups). Earlier fits are
+# in archive/ (see archive/README.md).
+iidcolsbm_trim <- readRDS("./Rdata/save_sbmfit/iidcolsbm_trim_round8.rds")$best_fit
 
-if(estim=='saintclair'){
-  iidcolsbm_trim <- readRDS("./Rdata/save_sbmfit/iidcolsbm_trim.rds")}
-if(estim =='nous'){
-  iidcolsbm_trim <- readRDS("./Rdata/save_sbmfit/iidcolsbm_trim_round8.rds")
-  iidcolsbm_trim <- iidcolsbm_trim$best_fit
-  }
-if(estim =='nousQ5'){
-  iidcolsbm_trim <- readRDS("./Rdata/save_sbmfit/iidcolsbm_trim_round7.rds")
-  iidcolsbm_trim <- iidcolsbm_trim$model_list[[1]][[5]][[1]] 
-  }
-
-Q <-iidcolsbm_trim$nb_clusters
-
-
-
-                                      
-                                      
-                                      
-
-
-
+Q <-iidcolsbm_trim$nb_clusters # number of groups
 
 
 #===============================================================================
 # Export the matrices from the colSBM
 #===============================================================================
+# 33 x 33 adjacency matrix of each quarter, with NA for the vessels that did
+# not fish during the quarter and for the couples of vessels that never
+# fished the same day (coded -1 in the colSBM object)
 trim_matrices <- lapply(
   seq(20),
   function(l) {
@@ -77,28 +81,25 @@ trim_matrices <- lapply(
 #===============================================================================
 # Compute the map of memberships for each vessel
 #===============================================================================
-
+# Z_trim: 33 x 20 matrix, group of each vessel in each quarter (NA if absent),
+# with groups relabelled so that 1, 2, ... correspond to the plotting order
+# best_ord (A, B, ... in the figures).
+# Note: get_Ztrim_relabel also swaps the labels of the two largest groups
+# (and of their most connected groups) in some quarters, so that vessel 1 is
+# never in the one of the two largest groups it belongs to less often.
+# Z_trim_map: most frequent group of each vessel over the quarters.
 best_ord = get_order(iidcolsbm_trim) 
 Z_trim <- get_Ztrim_relabel(iidcolsbm_trim)
 Z_trim <- relabel_Ztrim(Z_trim,best_ord)
 Z_trim_map <- get_Ztrim_map(Z_trim)  
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 #===============================================================================
 # Plot list of adjacency matrices reordered by Z_map with diagonal in color
 #===============================================================================
+# Exploratory, not in the paper. The diagonal is coloured with the raw labels
+# of the colSBM (not relabelled); note that hue_pal()(5) gives 5 colours while
+# the fit has Q = 6 groups (vessels of group 6 get no colour).
 p_list_trim <- lapply(
   seq(20),
   function(l) {
@@ -125,6 +126,9 @@ patchwork::wrap_plots(p_list_trim, ncol = 4, tag_level = 'keep', byrow = TRUE) +
 #===============================================================================
 # Plot list of adjacency matrices unordered (see plot from appendix)
 #===============================================================================
+# Figure A2: the 20 quarterly proximity graphs (rows: quarters, columns:
+# years). Black: edge; pink: NA (vessel not active during the quarter, or
+# couple of vessels that never fished the same day).
 array(unlist(trim_matrices), dim = c(33,33,20)) |>
   reshape2::melt() |> 
   mutate(Quarter = (Var3-1)%%4 + 1) |> 
@@ -150,6 +154,13 @@ ggsave("./images2/proxy_graph_trim_nous.png", scale = 2)
 #===============================================================================
 # Compute the BC coeefficient for DSI and GSI
 #===============================================================================
+# DSI (daily stability index) of a vessel: proportion of its couples of trips
+# on adjacent days with BC >= threshold.
+# GSI (global stability index): same for random couples of its trips.
+#
+# Latent parameters in an array (param x day x vessel): one row per vessel and
+# per week day of the period (full_join), NA when the vessel did not fish, so
+# that adjacent indices are adjacent week days. Rows 1-3: mu_k, rows 4-6: sig_k.
 df_cvae_c <- tibble(time = rep(seq(min(df_cvae$time), max(df_cvae$time), by = "days"), times = 33),
                     navire = rep(unique(df_cvae$navire), each = length(time)/33)) %>% 
   filter(wday(time) %in% c(2,3,4,5,6)) %>% 
@@ -168,6 +179,8 @@ ar_cvae_sig2 <-   ar_cvae_c[4:6,,]
 #===============================================================================
 # Compute DSI
 #===============================================================================
+# BC between the trips of day t and day t+1 of each vessel (product over the
+# 3 dimensions): (days - 1) x 33 matrix, NA if one of the two days is missing
 bclag_navire_cvae <- bhattacharyya_1d(
   mu1 = ar_cvae_mu[,1:(dim(ar_cvae_mu)[2]-1),], 
   mu2 = ar_cvae_mu[,2:dim(ar_cvae_mu)[2],], 
@@ -176,10 +189,11 @@ bclag_navire_cvae <- bhattacharyya_1d(
   apply(c(2,3), "prod")
 
 
-
 #===============================================================================
 # Compute GSI
 #===============================================================================
+# For each vessel, BC between 2e4 random couples of distinct trips
+# (2e4 x 33 matrix). No seed: the GSI vary slightly from one run to the next.
 mu_cvae <- as.matrix(df_cvae |> select(starts_with("mu")))
 sig2_cvae <- as.matrix(df_cvae |> select(starts_with("sig")))
 
@@ -208,6 +222,7 @@ threshold = 0.8
 bclag_navire_th <- colMeans(bclag_navire_cvae >= threshold, na.rm = TRUE)
 bc_navire_th <- colMeans(bc_navire >= threshold, na.rm = TRUE)
 
+# lag = DSI, dist = GSI
 bc_seuil_navire <- tibble(navire = seq(33),
                           lag = bclag_navire_th,
                           dist = bc_navire_th,
@@ -217,6 +232,8 @@ bc_seuil_navire <- tibble(navire = seq(33),
 #===============================================================================
 # Computing fleet and group average
 #===============================================================================
+# Z_trim_mean: 33 x Q matrix, proportion of its quarters each vessel spends
+# in each group
 Z_trim_mean <- outer(Z_trim, seq(Q), "==")  |> 
   apply(c(1,3), "mean", na.rm = TRUE) 
 
@@ -226,7 +243,9 @@ colnames(Mat_navire) <- c('navire',LETTERS[1:Q])
 Mat_navire <- as_tibble(Mat_navire)
 
 
-mean_group <- bc_seuil_navire%>% 
+# Group averages: mean of the indices of the vessels, weighted by the
+# proportion of time they spend in the group (squares in Figure 9)
+mean_group <- bc_seuil_navire%>%
   left_join(Mat_navire) %>% 
   filter(Model == "c-vae") %>% 
   pivot_longer(cols = LETTERS[1:Q],
@@ -235,11 +254,15 @@ mean_group <- bc_seuil_navire%>%
   summarise(lag = sum(as.numeric(Prop)*as.numeric(lag))/sum(Prop),
             dist = sum(as.numeric(Prop)*as.numeric(dist))/sum(Prop))
 
-mean_bc_boat <- bc_seuil_navire %>% 
+# Average of the vessels (triangle in Figure 9)
+mean_bc_boat <- bc_seuil_navire %>%
   filter(Model == "c-vae") %>% 
   select(lag, dist) %>% 
   colMeans()
 
+# Fleet (diamond in Figure 9): same indices computed on all the trips,
+# whatever the vessel. GSI on 1e5 random couples of trips; DSI on the BC
+# between trips of adjacent days of any two vessels (bc_lag_cvae.rds).
 n_traj <- nrow(df_cvae)
 ord1 <- sample(n_traj, 2e5, replace = TRUE)
 ord2 <- sample(n_traj, 2e5, replace = TRUE)
@@ -257,10 +280,14 @@ anno <- tibble(dist = mean(bc_cvae > .8),
                Model = c("c-vae"))
 
 
-
-bc_seuil_navire%>% 
-  left_join(Mat_navire) %>% 
-  filter(Model == "c-vae") %>% 
+#===============================================================================
+# Plot DSI and GSI for individual (Figure 9)
+#===============================================================================
+# Each vessel is a pie at (DSI, GSI) showing the proportions of its group
+# memberships. Vessels 2, 6 and 19 (Figures 5-6) are labelled in red.
+bc_seuil_navire%>%
+  left_join(Mat_navire) %>%
+  filter(Model == "c-vae") %>%
   ggplot() + xlab("DSI") + ylab("GSI") + xlim(0.15,NA) + ylim(0,0.2) +
   annotate("point", x = mean_bc_boat[1], y = mean_bc_boat[2], 
            col = "black", size = 8, shape = 17) +  
@@ -311,8 +338,12 @@ ggsave("./images2/bc_group_colsbm_trim_cvae.png", dpi = 300)
 #===============================================================================
 # Plot the matrix view of the mesoscale structure and the block memberhips.
 #===============================================================================
+# Figure 10. Left: proportion of the quarters each vessel spends in each
+# group, vessels 2, 6 and 19 framed in red. Right: connectivity matrix of the
+# colSBM, blocks in the order best_ord with widths = group proportions.
 
-#------------------- matrix 
+#------------------- matrix
+# Axis breaks at the block boundaries, group letters on the secondary axes
 p <-   plot(iidcolsbm_trim, ord = best_ord)
 breaks1 <-  c(p$data$xmax[1:Q], 1)
 breaks2 <- (breaks1[-1] + breaks1[-(Q+1)])/2
@@ -341,7 +372,7 @@ gg_Mat_groups <- ggplot(Mat_groups ,aes(x = Group, y = Vessel, alpha = Prop, fil
     geom_tile() + #scale_fill_gradient2() +
     scale_fill_discrete() +
     geom_hline(yintercept = seq(0,33) + .5) +
-    geom_vline(xintercept = seq(0,5) + .5) +
+    geom_vline(xintercept = seq(0,5) + .5) + # assumes 5 groups: the line after group F is missing when Q = 6
     scale_alpha_continuous(range = c(0,1)) +
     geom_hline(yintercept = c(5, 6, 1, 2, 18, 19) + 0.5, 
                col = "red", linewidth = 1.1) +

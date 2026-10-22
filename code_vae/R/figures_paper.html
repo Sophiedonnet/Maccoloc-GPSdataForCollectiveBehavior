@@ -3335,7 +3335,7 @@ Important
 </div>
 </div>
 <div class="callout-body-container callout-body">
-<p>The bootstrap fits of the first version of the paper (<code>Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/</code>, fits 1 to 30) were all estimated on the same network collection (see the header of <code>07c_fit_colsbm_proxy_graphs_resampling.R</code>). The fits used here were recomputed with the corrected script, one distinct sub-sample per replicate.</p>
+<p>The bootstrap fits of the first version of the paper (now in <code>archive/Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/</code>, fits 1 to 30) were all estimated on the same network collection (see the header of <code>07c_fit_colsbm_proxy_graphs_resampling.R</code>). The fits used here were recomputed with the corrected script, one distinct sub-sample per replicate.</p>
 </div>
 </div>
 <div class="cell">
@@ -3458,7 +3458,7 @@ Figure 14: Top: estimated mesoscale structures obtained from one bootstrap samp
 </tr>
 <tr class="even">
 <td>Quarterly graphs and colSBM fit</td>
-<td><code>07_fit_colsbm_proxy_graphs.R</code>, <code>07b_...R</code></td>
+<td><code>07b_fit_colsbm_proxy_graphs_replicate_results.R</code></td>
 <td><code>Rdata/trim_peche.rds</code>, <code>Rdata/save_sbmfit/iidcolsbm_trim_round8.rds</code></td>
 </tr>
 <tr class="odd">
@@ -4740,7 +4740,7 @@ loaded via a namespace (and not attached):
 <span id="cb31-770"><a href="#cb31-770" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb31-771"><a href="#cb31-771" aria-hidden="true" tabindex="-1"></a>::: {.callout-important}</span>
 <span id="cb31-772"><a href="#cb31-772" aria-hidden="true" tabindex="-1"></a>The bootstrap fits of the first version of the paper</span>
-<span id="cb31-773"><a href="#cb31-773" aria-hidden="true" tabindex="-1"></a>(<span class="in">`Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/`</span>, fits 1 to 30)</span>
+<span id="cb31-773"><a href="#cb31-773" aria-hidden="true" tabindex="-1"></a>(now in <span class="in">`archive/Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/`</span>, fits 1 to 30)</span>
 <span id="cb31-774"><a href="#cb31-774" aria-hidden="true" tabindex="-1"></a>were all estimated on the same network collection (see the header of</span>
 <span id="cb31-775"><a href="#cb31-775" aria-hidden="true" tabindex="-1"></a><span class="in">`07c_fit_colsbm_proxy_graphs_resampling.R`</span>). The fits used here were</span>
 <span id="cb31-776"><a href="#cb31-776" aria-hidden="true" tabindex="-1"></a>recomputed with the corrected script, one distinct sub-sample per replicate.</span>
@@ -4809,7 +4809,7 @@ loaded via a namespace (and not attached):
 <span id="cb31-843"><a href="#cb31-843" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> Export latent representations, generate grid trajectories <span class="pp">|</span> <span class="in">`py_workflow/cvae_analysis.ipynb`</span> <span class="pp">|</span> <span class="in">`pydata/latentspace_*.csv`</span>, <span class="in">`generated_traj_cvae3.csv`</span> <span class="pp">|</span></span>
 <span id="cb31-844"><a href="#cb31-844" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> Order the dimensions <span class="pp">|</span> <span class="in">`03_computing_bc.R`</span> <span class="pp">|</span> <span class="in">`Rdata/xgv_{cvae_3,vae_4}_reordered_filtered.csv`</span> <span class="pp">|</span></span>
 <span id="cb31-845"><a href="#cb31-845" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> BC between vessels, same / adjacent days <span class="pp">|</span> <span class="in">`06_build_proximity_graph.R`</span> <span class="pp">|</span> <span class="in">`Rdata/bc_jour_cvae.rds`</span>, <span class="in">`bc_lag_cvae.rds`</span>, <span class="in">`ldates.rds`</span> <span class="pp">|</span></span>
-<span id="cb31-846"><a href="#cb31-846" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> Quarterly graphs and colSBM fit <span class="pp">|</span> <span class="in">`07_fit_colsbm_proxy_graphs.R`</span>, <span class="in">`07b_...R`</span> <span class="pp">|</span> <span class="in">`Rdata/trim_peche.rds`</span>, <span class="in">`Rdata/save_sbmfit/iidcolsbm_trim_round8.rds`</span> <span class="pp">|</span></span>
+<span id="cb31-846"><a href="#cb31-846" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> Quarterly graphs and colSBM fit <span class="pp">|</span> <span class="in">`07b_fit_colsbm_proxy_graphs_replicate_results.R`</span> <span class="pp">|</span> <span class="in">`Rdata/trim_peche.rds`</span>, <span class="in">`Rdata/save_sbmfit/iidcolsbm_trim_round8.rds`</span> <span class="pp">|</span></span>
 <span id="cb31-847"><a href="#cb31-847" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> Bootstrap of the colSBM <span class="pp">|</span> <span class="in">`07c_fit_colsbm_proxy_graphs_resampling.R`</span> <span class="pp">|</span> <span class="in">`Rdata/save_colsbm_bootstrap/`</span> <span class="pp">|</span></span>
 <span id="cb31-848"><a href="#cb31-848" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> Catch data of the trips <span class="pp">|</span> <span class="in">`09_extract_xgv_capture.R`</span> <span class="pp">|</span> <span class="in">`Rdata/sacrois_xgv_capt.csv`</span> <span class="pp">|</span></span>
 <span id="cb31-849"><a href="#cb31-849" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> Reconstructions for Figure A1 <span class="pp">|</span> <span class="in">`py_workflow/export_reconstruction.py`</span> <span class="pp">|</span> <span class="in">`pydata/reconstruction_cvae3.csv`</span> <span class="pp">|</span></span>

@@ -1,19 +1,38 @@
 #===============================================================================
+# colSBM fit on the quarterly proximity graphs
+# (fit used for all the results of the paper: Figures 9-11, A2, A3)
+#
 # This script does the following
-# - Build quarterly graph from a fraction of all the imported proximity array 
-# - Fit a colSBM model on the data for each sub sample
-# - Export the fitted model for each sub sample
+# - Build the 20 quarterly proximity graphs from the imported proximity array:
+#   vessels b and b' are connected in a quarter if the `quantile`-quantile of
+#   their daily BC over the days of the quarter is above `threshold`
+# - Fit an iid-colSBM on the collection of the 20 graphs
+# - Export the fitted model
+#
+# Inputs (produced by 06_build_proximity_graph.R):
+# - Rdata/bc_jour_cvae.rds : array (days x 33 x 33) of the BC between the
+#                            trajectories of two vessels on the same day
+# - Rdata/ldates.rds       : dates corresponding to the first dimension
+#
+# Outputs:
+# - Rdata/trim_peche.rds   : for each quarter, vessels (1..33) that fished
+# - Rdata/save_sbmfit/iidcolsbm_trim_round8.rds : colSBM fit (object of class
+#   bmpop; the selected model is $best_fit, with 6 blocks)
+#
+# Every step is skipped when its output file already exists.
+#
+# Note: the colSBM options below are the ones stored in the saved fit
+# ($global_opts). The number of runs (nb_run) is not stored in the fit.
+#
+# Earlier fits (first version of the paper, intermediate rounds) and the
+# script comparing them with this fit are in archive/ (see archive/README.md).
 #===============================================================================
 
 
 library(tidyverse)
 library(lubridate)
-library(mclust)
 #devtools::install_github("GrossSBM/colSBM",force=TRUE)
 library(colSBM)
-library(patchwork)
-source(file='99_helper_functions.R')
-source(file='98_functions_resampling.R')
 
 threshold <-  0.8
 quantile   <- 0.8
@@ -21,16 +40,17 @@ quantile   <- 0.8
 
 bc_jour_cvae_ar <- readRDS("Rdata/bc_jour_cvae.rds")
 ldates <- readRDS("Rdata/ldates.rds")
+# The 20 quarters, ordered by year then quarter: (1, 2014), (2, 2014), ...
 trim_year <- expand.grid(seq(4), seq(2014, 2018)) %>%
   rename(Trim = Var1, Year = Var2)
 
 #===============================================================================
-# Build a list of vector of boolean. TRUE if vessels [i] has fishing days in 
+# Build a list of vector of boolean. TRUE if vessels [i] has fishing days in
 # quarter [[k]]
 #===============================================================================
 file_trim_peche = "./Rdata/trim_peche.rds"
 if (! file.exists(file_trim_peche)){
-trim_peche <- 
+trim_peche <-
    lapply(seq(20),
           function(t) {
             id <- which(
@@ -38,23 +58,29 @@ trim_peche <-
               (((month(ldates) + 3) %%4) + 1) == trim_year$Trim[t])
             net <- 1*(
               apply(
-                bc_jour_cvae_ar[id,,], 
-                c(2,3), 
-                "quantile", 
-                na.rm = TRUE, probs = quantile) > threshold)           
+                bc_jour_cvae_ar[id,,],
+                c(2,3),
+                "quantile",
+                na.rm = TRUE, probs = quantile) > threshold)
             trim_peche_t <- ! is.na(diag(net))
             return(trim_peche_t)
           })
 saveRDS(trim_peche, file_trim_peche)
 }
+
+#===============================================================================
 # Construct collection of full network
+#===============================================================================
+# Adjacency matrix of each quarter, restricted to the vessels that fished
+# during the quarter (rows/columns named by the vessel number 1..33). NA if
+# two vessels never fished the same day.
 net_BCq8_trim <-
   lapply(seq(20),
          function(t) {
            id <- which(
              year(ldates) == trim_year$Year[t] &
                (((month(ldates) + 3) %%4) + 1) == trim_year$Trim[t])
-           
+
            net <- 1*(
              apply(
                bc_jour_cvae_ar[id,,],
@@ -67,11 +93,12 @@ net_BCq8_trim <-
            diag(net) <- 0
            net
          })
+
 #===============================================================================
-# Replicate saint clair'e results 
+# Fit the iid-colSBM
 #===============================================================================
-my_global_opts = list(nb_cores = 4,
-                      nb_models = 1,
+my_global_opts = list(nb_cores = 1,
+                      nb_models = 3,
                       nb_init = 10,
                       depth = 4,
                       verbosity = 1,
@@ -79,18 +106,8 @@ my_global_opts = list(nb_cores = 4,
                       Q_max = 7,
                       plot_details = 1)
 
-
-#-------------- de Zinit 
-iidcol_trim_clust_full_replicate7 <- readRDS(paste0("Rdata/save_sbmfit/iidcolsbm_trim_round7.rds"))
-iidcol_trim_clust_full_saintClair <- readRDS(paste0("Rdata/save_sbmfit/iidcolsbm_trim.rds"))
-
-
-
-Z_init <- lapply(1:7,function(Q){
-    iidcol_trim_clust_full_replicate7$model_list[[1]][[Q]][[1]]$Z})
-Z_init[[5]] <- iidcol_trim_clust_full_saintClair$Z
 file_res_full = paste0("Rdata/save_sbmfit/iidcolsbm_trim_round8.rds")
-if (! file.exists(file_res_full)){ 
+if (! file.exists(file_res_full)){
   iidcol_trim_clust <- colSBM::estimate_colSBM(netlist = net_BCq8_trim,
                                              colsbm_model = "iid",
                                              net_id =  trim_year %>% transmute(trimyear = paste0(Trim, "_", Year)) %>% pull(trimyear),
@@ -100,62 +117,6 @@ if (! file.exists(file_res_full)){
   rm(iidcol_trim_clust)
 }
 
-  
-
-#===============================================================================
-#  Exploitation résultats. 
-#===============================================================================
-file_res_full_replicate8 = paste0("Rdata/save_sbmfit/iidcolsbm_trim_round8.rds")
-file_res_full_saintClair = paste0("Rdata/save_sbmfit/iidcolsbm_trim.rds")
-iidcol_trim_clust_full_saintClair <- readRDS(file_res_full_saintClair)
-iidcol_trim_clust_full_replicate8 <- readRDS(file_res_full_replicate8)
-
-bestfit_replicate <- iidcol_trim_clust_full_replicate8$best_fit
-bestfit_saintClair <- iidcol_trim_clust_full_saintClair
-
-#file_res_full_replicate7 = paste0("Rdata/save_sbmfit/iidcolsbm_trim_round7.rds")
-#file_res_full_replicate6= paste0("Rdata/save_sbmfit/iidcolsbm_trim_round6.rds")
-#file_res_full_replicate5= paste0("Rdata/save_sbmfit/iidcolsbm_trim_round5.rds")
-
-
-
-
-
-
-
-
-
-
-
-
-#==================================================== 
-#-------------- Reorder by minimizing the graphon L2 distance
-#====================================================
-
-o_saintClair = get_order(bestfit_saintClair)
-o_replicate  = get_order_withref(fit = bestfit_replicate, fit_ref=bestfit_saintClair,order_ref=o_saintClair)
-
-p_replicate <- plot(bestfit_replicate, type = "graphon",ord=o_replicate)  + theme(legend.position = "none") + ggtitle("Replicate")
-p_saintClair <- plot(bestfit_saintClair, type = "graphon",ord=o_saintClair) + theme(legend.position = "none")  +  ggtitle("Saint Clair")
-
-(p_saintClair | p_replicate ) 
-
-
-#==================================================== 
-#--------------------- compar final clustering bateau 
-#==================================================== 
-
-Ztrim_replicate <- get_Ztrim_relabel(bestfit_replicate)
-Ztrim_replicate_2  <- relabel_Ztrim(Ztrim_replicate,o_replicate_withref)
-Ztrim_map_replicate <- get_Ztrim_map(Ztrim_replicate_2)
-
-Ztrim_saintClair <- get_Ztrim(bestfit_saintClair)
-Ztrim_saintClair_2  <- relabel_Ztrim(Ztrim_saintClair,o_saintClair)
-Ztrim_map_saintClair <- get_Ztrim_map(Ztrim_saintClair_2)
-
-table(Ztrim_map_replicate ,Ztrim_map_saintClair)
-adjustedRandIndex(Ztrim_map_replicate ,Ztrim_map_saintClair)
-
-
-
-
+# Selected model
+bestfit <- readRDS(file_res_full)$best_fit
+bestfit$nb_clusters

@@ -1,15 +1,32 @@
 #===============================================================================
+# Sensitivity analysis of the CVAE decoder
+# (Figure 8 of the paper, file sobol_indices.png)
+#
 # This script does the following:
-# - Import generated trajectories from cvae3
+# - Import trajectories generated with the decoder of the CVAE (d_z = 3), on a
+#   grid of latent values and months (z_3 = 0)
 #   The imported files contains the following:
-#   - computed sensitivity indices 
-#   - mu_1, mu_2 and eta 
-#   - 1200 trajectoires (10 mu1, 10 mu_2, et 12 mois)
-#   - Compute dmax and theta[dmax]
+#   - mu1, mu2 (latent values z_1, z_2) and month m, coded as (cos_eta, sin_eta)
+#   - 1200 trajectoires (10 mu1, 10 mu_2, et 12 mois), 960 after mu1 <= 1.2
+#   - h, x, y: hour and standardized positions (see coord2std)
+# - Compute, for each generated trajectory, the maximal distance to the
+#   harbour D_max (km) and the direction theta_max of the farthest point
 #     - With the article euclidean distance (uncomment to use)
 #     - With a corrected projected version (comment if needed)
-#  - Compute the sobol MDA indices 
+# - Predict D_max and theta_max from (z_1, z_2, cos m, sin m) with a random
+#   forest, and compute the Sobol-MDA index of each input (Figure 8)
 #
+# Input: generated_traj_cvae3.csv (py_workflow/cvae_analysis.ipynb)
+#
+# Note: the script reads ./pydata/generated_traj_cvae3.csv, but the file of
+# the repository is ../py_workflow/generated_traj_cvae3.csv: copy it to
+# pydata/ (or change the path) before running.
+#
+# Notes:
+# - The paper reports 10 replications with independently simulated sets of
+#   3000 trajectories; this script uses the single grid of trajectories of the
+#   input file and one forest (no seed).
+# - The figure is not saved by the script (no ggsave).
 #===============================================================================
 
 library(tidyverse)
@@ -18,9 +35,9 @@ library(sobolMDA) # available here: https://gitlab.com/drti/sobolmda
 # To download and install from the .tar.gz using
 # install.packages("sobolmda-sobolMDA.tar.gz")
 #devtools::install_git("https://gitlab.com/drti/sobolmda")
-rm(list = ls()) # Nettoyage
+rm(list = ls())
 source("./99_helper_functions.R")
-# Chargement données
+# Data
 
 donnees <- read.table("./pydata/generated_traj_cvae3.csv",
                       sep = ",",
@@ -46,6 +63,11 @@ donnees
 #===============================================================================
 # New and more exact version
 #===============================================================================
+# Positions back to (lon, lat), then projected in km around the harbour
+# (1 minute of arc ~ 1 nautical mile, taken as 1.8 km; longitudes scaled by
+# cos(lat)). For each generated trajectory (one value of (mu1, mu2, month)),
+# only the farthest point is kept: max_dist = D_max and max_theta = its
+# direction theta_max.
 
 donnees <- donnees |> 
   mutate(lon = std2coord(x, -4.28),
@@ -76,6 +98,9 @@ donnees <- donnees |>
 #   filter(dist == max_dist)
 
 
+#===============================================================================
+# Random forests and Sobol-MDA indices
+#===============================================================================
 best_model_max_theta <- sobolMDA::ranger(formula = max_theta ~ mu1 + mu2 + cos_eta + sin_eta,
                                          num.trees = 500, data = donnees,
                                          importance = "sobolMDA", mtry = 3, 
@@ -87,7 +112,8 @@ best_model_max_dist <- sobolMDA::ranger(formula = max_dist ~ mu1 + mu2 + cos_eta
 
 best_model_max_dist
 best_model_max_theta
-# Graphiques --------------------------------------------------------------
+# Figure 8 ----------------------------------------------------------------
+# Sobol-MDA index of each input, for D_max and theta_max
 
 importances <- sobolMDA::importance(best_model_max_dist) %>% 
   enframe(name = "rowname", value = "Importance") %>% 

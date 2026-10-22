@@ -1,0 +1,807 @@
+---
+title: "Auto-encoding GPS data to reveal individual and collective behaviour"
+subtitle: "Vignette: reproducing the figures of the paper"
+author: "S. Chabert-Liddell, N. Bez, P. Gloaguen, S. Donnet, S. Mahévas"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    code-fold: show
+    code-tools: true
+    embed-resources: true
+    fig-align: center
+    fig-dpi: 150
+execute:
+  warning: false
+  message: false
+  cache: false
+---
+
+# Introduction {-}
+
+This vignette reproduces the data figures of the paper, in the order in which
+they appear in the manuscript (`article/main.tex`). Each section states the
+figure number, the original script it comes from (in `code_vae/R/` or
+`code_vae/py_workflow/`) and the file name used in `article/figures/`.
+
+The vignette is **plot-only**: it starts from the intermediate results already
+stored in the repository (latent representations exported by the CVAE/VAE,
+Bhattacharyya arrays, colSBM fits, bootstrap fits, catch data). The
+time-consuming steps (training the networks, computing the BC arrays, fitting
+the colSBM models) are described in [Section @sec-pipeline] and are not re-run
+here.
+
+Figures 1 (architecture of the CVAE) and 2 (workflow) are schematic diagrams
+and are not produced from data.
+
+## Setup {.unnumbered}
+
+The vignette must be rendered from the `code_vae/R/` folder (the paths below are
+relative to it):
+
+```bash
+cd code_vae/R
+quarto render figures_paper.qmd
+```
+
+Packages:
+
+* CRAN: `tidyverse`, `matrixStats`, `patchwork`, `gghighlight`, `maps`,
+  `ggrepel`, `scatterpie`, `cowplot`, `latex2exp`, `mclust`, `gtools`,
+  `reshape2`, `graphclust`.
+* GitHub: `colSBM` (`remotes::install_github("GrossSBM/colSBM")`).
+* GitLab: `sobolMDA` (<https://gitlab.com/drti/sobolmda>), a modified version
+  of `ranger` computing the Sobol-MDA importance. Note that the GitLab sources
+  are published under the package name `ranger`: they must be renamed
+  `sobolMDA` before installation, otherwise they overwrite the CRAN `ranger`.
+
+```{r}
+#| label: setup
+#| code-fold: true
+library(tidyverse)
+library(lubridate)
+library(matrixStats)
+library(patchwork)
+library(colSBM)
+source("./99_helper_functions.R")    # bhattacharyya_1d(), kullback_1d(), coord2std()
+source("./98_functions_resampling.R") # get_order(), get_Ztrim*(), ...
+
+theme_set(theme_bw(base_size = 14))
+harbour <- c(lon = -4.28, lat = 47.78)
+
+# The three contrasted vessels discussed in the paper
+boat <- c(2, 6, 19)
+```
+
+## Data {.unnumbered}
+
+```{r}
+#| label: data
+# Latent representations (CVAE d=3, VAE d=4), with dimensions reordered by
+# importance (output of 03_computing_bc.R). sig_k are variances (gamma^2).
+df_cvae <- read_csv("./Rdata/xgv_cvae_3_reordered_filtered.csv", show_col_types = FALSE)
+df_vae  <- read_csv("./Rdata/xgv_vae_4_reordered_filtered.csv",  show_col_types = FALSE)
+
+# Hourly trajectories (output of 02_merge_xgv.R), week days only
+df_traj <- read_csv("./Rdata/xgv_100_14-18.csv", show_col_types = FALSE) |>
+  filter(wday(time) %in% 2:6, maree != 12097796) |>
+  mutate(x_std = coord2std(x, harbour["lon"]),
+         y_std = coord2std(y, harbour["lat"]))
+
+# Vessels are numbered 1..33 in the order of appearance in df_cvae
+navire_id <- unique(df_cvae$navire)
+
+c(trips = nrow(df_cvae), vessels = length(navire_id))
+```
+
+# Structure of the latent space
+
+## Figure 3 -- Choice of the latent dimension {#sec-fig-elbo}
+
+*Original: `py_workflow/comparaison_monitor.ipynb`; file `elbo_dkl.png`.*
+Loss ($-\mathrm{ELBO}$) and regularisation term ($D_{KL}$) along the 1000
+training epochs for the VAE and the CVAE with $d_z = 2, \dots, 5$.
+
+```{r}
+#| label: fig-elbo
+#| fig-cap: "Loss (-ELBO) and regularization term (DKL) for the first 1000 epochs for the VAE and the CVAE with 2 to 5 latent dimensions."
+#| fig-width: 11
+#| fig-height: 7
+monitor <- expand_grid(model = c("vae", "cvae"), nz = 2:5) |>
+  mutate(data = map2(model, nz, \(m, k) read_csv(
+    sprintf("../py_workflow/save/monitor_%s_std_10k_%d_adam_1000.csv", m, k),
+    show_col_types = FALSE))) |>
+  unnest(data) |>
+  rename(epoch = `...1`) |>
+  mutate(Model = factor(toupper(model), levels = c("VAE", "CVAE")),
+         nz = factor(nz))
+
+p_loss <- ggplot(monitor, aes(epoch, loss, col = nz)) +
+  geom_line(linewidth = .4) +
+  facet_wrap(~ Model) +
+  coord_cartesian(ylim = c(5, 12)) +
+  labs(x = NULL, y = "- ELBO", col = expression(d[z]))
+p_dkl <- ggplot(monitor, aes(epoch, dkl, col = nz)) +
+  geom_line(linewidth = .4) +
+  facet_wrap(~ Model) +
+  coord_cartesian(ylim = c(0, 5)) +
+  labs(x = "Epoch", y = "DKL", col = expression(d[z]))
+p_loss / p_dkl + plot_layout(guides = "collect")
+```
+
+## Figure 4 -- Ordering the dimensions {#sec-fig-dimension}
+
+*Original: `03_computing_bc.R`; file `plot_dimension.png`.* For $10^5$ random
+couples of trajectories, distribution of the Bhattacharyya coefficient on each
+dimension (left), and of the Kullback-Leibler divergence between each
+variational distribution and the $\mathcal{N}(0,1)$ prior (right). The
+dimensions are already ordered by importance in the input files.
+
+```{r}
+#| label: fig-dimension
+#| fig-cap: "Empirical distribution of BC between couples of variational distribution and Kullback-Leibler divergence between variational distribution and normal Gaussian for each dimension of the latent space."
+#| fig-width: 11
+#| fig-height: 4.5
+set.seed(1)
+n_traj <- nrow(df_cvae)
+ord1 <- sample(n_traj, 2e5, replace = TRUE)
+ord2 <- sample(n_traj, 2e5, replace = TRUE)
+ind  <- ord1 != ord2
+ord1 <- ord1[ind][1:1e5]
+ord2 <- ord2[ind][1:1e5]
+
+latent_matrices <- function(df) {
+  d <- sum(startsWith(names(df), "mu_"))
+  list(mu   = as.matrix(df[paste0("mu_", seq(d))]),
+       sig2 = as.matrix(df[paste0("sig_", seq(d))]))
+}
+lat <- list(CVAE = latent_matrices(df_cvae), VAE = latent_matrices(df_vae))
+
+to_long <- function(m, model, value) {
+  colnames(m) <- seq_len(ncol(m))
+  as_tibble(m) |>
+    pivot_longer(everything(), names_to = "Dim", values_to = value) |>
+    mutate(Model = model)
+}
+df_bc <- imap_dfr(lat, \(l, model) to_long(
+  bhattacharyya_1d(l$mu[ord1, ], l$mu[ord2, ], l$sig2[ord1, ], l$sig2[ord2, ]), model, "BC"))
+df_kl <- imap_dfr(lat, \(l, model) to_long(kullback_1d(l$mu, 0, l$sig2, 1), model, "DKL"))
+
+plot_dim <- function(df, y) {
+  ggplot(df, aes(x = Dim, y = .data[[y]])) +
+    geom_boxplot() +
+    geom_violin(col = "tomato", alpha = .6) +
+    facet_wrap(~ Model, scales = "free_x") +
+    xlab("Dimension")
+}
+plot_dim(df_bc, "BC") + plot_dim(df_kl, "DKL")
+```
+
+# Linking latent representations to trajectories
+
+## Figure 5 -- Time series of the latent distributions {#sec-fig-ts-mu}
+
+*Original: `04_analysis_selected_vessels.R`; file `plot_ts_mu.png`.* For vessels
+2, 6 and 19, time series of $\mu_{(b,t),k}$ and of the band
+$\mu \pm z\,\gamma$ for the VAE and the CVAE.
+
+::: {.callout-note}
+The script (and hence the published figure) uses $z = $ `qnorm(.95)` $\approx 1.645$,
+while the caption of the paper states $1.96$. The value used is set below.
+:::
+
+```{r}
+#| label: fig-ts-mu
+#| fig-cap: "Time series of the latent variational distributions for vessels b = 2, 6, 19 and k = 1, ..., d_z."
+#| fig-width: 13
+#| fig-height: 6
+z_band <- qnorm(.95)
+
+plot_ts <- function(b) {
+  bind_rows(VAE = df_vae, CVAE = df_cvae, .id = "model") |>
+    filter(navire == navire_id[b]) |>
+    pivot_longer(cols = starts_with("mu_") | starts_with("sig_"),
+                 names_sep = "_", names_to = c("moment", "dim")) |>
+    pivot_wider(names_from = moment, values_from = value) |>
+    filter(!is.na(mu)) |>
+    ggplot(aes(x = time, y = mu, col = model, fill = model, lty = model)) +
+    geom_ribbon(aes(ymin = mu - z_band * sqrt(sig), ymax = mu + z_band * sqrt(sig)),
+                linetype = "dotted", alpha = .3, linewidth = .01) +
+    geom_line(alpha = .8) +
+    scale_color_manual(values = c(CVAE = "tomato", VAE = "steelblue")) +
+    scale_fill_manual(values = c(CVAE = "tomato", VAE = "steelblue")) +
+    ylim(-2.5, 2.5) +
+    xlim(as.Date("2014-01-01"), as.Date("2018-12-31")) +
+    facet_grid(dim ~ .) +
+    labs(x = NULL, y = NULL, title = b)
+}
+(plot_ts(2) + ylab("Z")) + plot_ts(6) + plot_ts(19) +
+  plot_layout(guides = "collect")
+```
+
+## Figure 6 -- Trajectories and latent space of 3 vessels {#sec-fig-traj-ls-3boat}
+
+*Original: `04_analysis_selected_vessels.R`; file
+`plot_traj_latent_2-6-19_new.png`.* Highlighted: June 2015 (orange) and
+December 2015 (blue). In the latent space, $x$, $y$ and point size are
+$\mu_1$, $\mu_2$ and $\mu_3$.
+
+```{r}
+#| label: fig-traj-ls-3boat
+#| fig-cap: "Trajectories and latent space for fishing vessels 2, 6 and 19."
+#| fig-width: 11
+#| fig-height: 7.5
+renumber <- function(df) {
+  df |>
+    filter(navire %in% navire_id[boat]) |>
+    mutate(navire = factor(match(navire, navire_id), levels = boat),
+           month = factor(month(time), levels = 1:12),
+           year = year(time))
+}
+highlight_months <- c("6", "12")
+month_colours <- c(`6` = "tomato", `12` = "steelblue")
+
+p_traj3 <- df_traj |>
+  renumber() |>
+  ggplot(aes(x = x_std, y = y_std, col = month, group = maree)) +
+  geom_path(linewidth = .5, alpha = .5, show.legend = FALSE) +
+  geom_point(size = .6, show.legend = FALSE) +
+  gghighlight::gghighlight(month %in% highlight_months & year == 2015,
+                           calculate_per_facet = TRUE) +
+  scale_color_manual(values = month_colours) +
+  facet_grid(navire ~ .) +
+  coord_fixed(xlim = c(-7.5, 5), ylim = c(-6, 2)) +
+  labs(x = expression(y[1]), y = expression(y[2]))
+
+p_lat3 <- bind_rows(VAE = df_vae, CVAE = df_cvae, .id = "Model") |>
+  renumber() |>
+  ggplot(aes(x = mu_1, y = mu_2, size = mu_3, col = month)) +
+  geom_point(show.legend = FALSE) +
+  gghighlight::gghighlight(month %in% highlight_months & year == 2015,
+                           calculate_per_facet = TRUE) +
+  scale_color_manual(values = month_colours) +
+  facet_grid(navire ~ Model) +
+  coord_fixed(xlim = c(-3, 3), ylim = c(-3, 3)) +
+  labs(x = expression(mu[1]), y = expression(mu[2]))
+
+p_traj3 | p_lat3
+```
+
+## Figure 7 -- Trajectories coloured by their latent parameters {#sec-fig-traj-mu}
+
+*Original: `05a_analysis_latent_space.R`; files `plot_traj_mu.png` and
+`plot_traj_sig.png`.* Each trajectory is coloured by the mean $\mu_k$ (top)
+and the variance $\gamma^2_k$ (bottom) of its CVAE variational distribution.
+The red lozenge is the harbour.
+
+```{r}
+#| label: fig-traj-mu
+#| fig-cap: "Trajectories coloured by the value of the parameters of their variational distribution in the latent space (mu above and gamma^2 below) on each of the 3 dimensions of the CVAE."
+#| fig-width: 12
+#| fig-height: 8
+coast <- map_data("france", xlim = c(-5.3, -3.6), ylim = c(47, 48.3))
+
+df_traj_lat <- df_traj |>
+  select(maree, x, y) |>
+  inner_join(select(df_cvae, maree, starts_with("mu_"), starts_with("sig_")),
+             by = "maree")
+
+plot_traj_param <- function(param, labels, legend) {
+  df_traj_lat |>
+    pivot_longer(cols = starts_with(param), names_to = "Dim", values_to = "value") |>
+    mutate(Dim = factor(Dim, levels = paste0(param, 1:3), labels = labels)) |>
+    ggplot(aes(x = x, y = y, col = value, group = maree)) +
+    annotation_map(coast, fill = "grey90", col = "grey60") +
+    geom_path(alpha = .1) +
+    annotate("point", x = harbour["lon"], y = harbour["lat"],
+             shape = 23, size = 4, fill = "red") +
+    scale_colour_viridis_c(direction = -1) +
+    facet_wrap(~ Dim, labeller = label_parsed) +
+    coord_quickmap() +
+    labs(x = "Longitude", y = "Latitude", col = legend)
+}
+plot_traj_param("mu_", c("mu[1]", "mu[2]", "mu[3]"), expression(mu)) /
+  plot_traj_param("sig_", c("gamma[1]^2", "gamma[2]^2", "gamma[3]^2"), expression(gamma^2))
+```
+
+## Figure 8 -- Sensitivity analysis {#sec-fig-sobol}
+
+*Original: `05b_sensitivity_analysis.R`; file `sobol_indices.png`.* Trajectories
+are generated with the CVAE decoder on a grid of $(z_1, z_2)$ and months
+($z_3 = 0$), exported by `py_workflow/cvae_analysis.ipynb` into
+`generated_traj_cvae3.csv`. For each generated trajectory, the maximal
+distance to the harbour $D_{\max}$ (km) and the direction of the farthest
+point $\theta_{\max}$ are predicted from $(z_1, z_2, \cos m, \sin m)$ with a
+random forest, and the Sobol-MDA index of each input is computed.
+
+::: {.callout-warning}
+The paper reports 10 replications with *independently simulated* trajectory
+sets (3000 trajectories each). The repository only contains one
+(deterministic) set of 1200 grid trajectories (960 after `mu1 <= 1.2`). Here
+the 10 replications differ only by the random seed of the forest, so the
+min-max bars only reflect the forest variability.
+:::
+
+```{r}
+#| label: fig-sobol
+#| fig-cap: "Sensitivity of trajectory characteristics (D_max: distance to the port; theta_max: main direction) to the conditioning variable and the first 2 dimensions. Dots: mean over 10 replications; bars: min-max."
+#| fig-width: 8
+#| fig-height: 5
+gen <- read.csv("../py_workflow/generated_traj_cvae3.csv", row.names = 1) |>
+  filter(mu1 <= 1.2) |>
+  mutate(lon = std2coord(x, harbour["lon"]),
+         lat = std2coord(y, harbour["lat"])) |>
+  # local projection around the harbour (1 minute of arc ~ 1.8 km)
+  mutate(x = (lon - harbour["lon"]) * 60 * 1.8 * cos(lat / 180 * pi),
+         y = (lat - harbour["lat"]) * 60 * 1.8,
+         dist = sqrt(x^2 + y^2),
+         theta = atan(y / x)) |>
+  group_by(mu1, mu2, cos_eta, sin_eta) |>
+  filter(dist == max(dist)) |>
+  summarise(max_dist = first(dist), max_theta = first(theta), .groups = "drop")
+
+sobol_importance <- function(response, seed) {
+  set.seed(seed)
+  fit <- sobolMDA::ranger(reformulate(c("mu1", "mu2", "cos_eta", "sin_eta"), response),
+                          data = gen, num.trees = 500, mtry = 3,
+                          sample.fraction = 0.1, importance = "sobolMDA")
+  enframe(sobolMDA::importance(fit), name = "variable", value = "Importance")
+}
+
+importances <- expand_grid(metric = c("max_dist", "max_theta"), rep = 1:10) |>
+  mutate(imp = map2(metric, rep, sobol_importance)) |>
+  unnest(imp) |>
+  group_by(metric, variable) |>
+  summarise(mean = mean(Importance), min = min(Importance), max = max(Importance),
+            .groups = "drop") |>
+  mutate(variable = factor(variable, levels = c("sin_eta", "cos_eta", "mu2", "mu1")))
+
+ggplot(importances, aes(x = variable, y = mean, ymin = min, ymax = max, col = metric)) +
+  geom_pointrange(size = .6, linewidth = 1) +
+  coord_cartesian(ylim = c(0, 1)) +
+  scale_x_discrete(labels = c(mu1 = expression(z[1]), mu2 = expression(z[2]),
+                              sin_eta = expression(sin(m)), cos_eta = expression(cos(m)))) +
+  scale_color_discrete("Trajectory\ncharacteristic",
+                       labels = c(expression(D[max]), expression(theta[max]))) +
+  labs(x = "Variable", y = "Importance")
+```
+
+# Individual and collective behaviours
+
+## Common objects: colSBM groups and stability indices
+
+The groups are given by the colSBM fit on the 20 quarterly proximity graphs
+(`07b_fit_colsbm_proxy_graphs_replicate_results.R`, saved in
+`Rdata/save_sbmfit/iidcolsbm_trim_round8.rds`). Groups are relabelled A--F
+with the ordering functions of `98_functions_resampling.R`, as in
+`08_analyse_behaviour.R`.
+
+```{r}
+#| label: colsbm
+trim_peche <- readRDS("./Rdata/trim_peche.rds")     # vessels active per quarter
+bc_lag_cvae_ar <- readRDS("./Rdata/bc_lag_cvae.rds") # BC between adjacent days
+
+iidcolsbm_trim <- readRDS("./Rdata/save_sbmfit/iidcolsbm_trim_round8.rds")$best_fit
+Q <- iidcolsbm_trim$nb_clusters
+
+best_ord   <- get_order(iidcolsbm_trim)
+Z_trim     <- get_Ztrim_relabel(iidcolsbm_trim) |> relabel_Ztrim(best_ord) # 33 x 20
+Z_trim_map <- get_Ztrim_map(Z_trim)
+
+# Proportion of the quarters spent by each vessel in each group
+Mat_navire <- outer(Z_trim, seq(Q), "==") |>
+  apply(c(1, 3), mean, na.rm = TRUE) |>
+  `colnames<-`(LETTERS[1:Q]) |>
+  as_tibble() |>
+  mutate(navire = seq(33), .before = 1)
+
+group_colours <- setNames(scales::hue_pal()(Q), LETTERS[1:Q])
+Q
+```
+
+The daily stability index (DSI, proportion of couples of trajectories on
+adjacent days with $\mathrm{BC} \geq 0.8$) and the global stability index
+(GSI, same for random couples of trajectories of the vessel) are computed as
+in `08_analyse_behaviour.R`.
+
+```{r}
+#| label: stability
+threshold <- 0.8
+
+# Vessel x day array of variational parameters (missing trips are NA)
+df_cvae_c <- tibble(time = rep(seq(min(df_cvae$time), max(df_cvae$time), by = "days"), times = 33),
+                    navire = rep(navire_id, each = length(time) / 33)) |>
+  filter(wday(time) %in% 2:6) |>
+  full_join(df_cvae, by = c("time", "navire")) |>
+  arrange(time)
+
+ar_cvae_c <- df_cvae_c |>
+  select(starts_with("mu") | starts_with("sig")) |>
+  t() |> as.vector() |>
+  array(dim = c(6, 33, nrow(df_cvae_c) / 33)) |>
+  aperm(c(1, 3, 2))
+ar_cvae_mu   <- ar_cvae_c[1:3, , ]
+ar_cvae_sig2 <- ar_cvae_c[4:6, , ]
+n_days <- dim(ar_cvae_mu)[2]
+
+# DSI: BC between the trajectories of a vessel on two consecutive fishing days
+bclag_navire <- bhattacharyya_1d(
+  mu1  = ar_cvae_mu[, -n_days, ],   mu2  = ar_cvae_mu[, -1, ],
+  var1 = ar_cvae_sig2[, -n_days, ], var2 = ar_cvae_sig2[, -1, ]) |>
+  apply(c(2, 3), prod)
+
+# GSI: BC between 2e4 random couples of trajectories of the vessel
+mu_cvae   <- as.matrix(select(df_cvae, starts_with("mu")))
+sig2_cvae <- as.matrix(select(df_cvae, starts_with("sig")))
+set.seed(2)
+bc_navire <- sapply(seq(33), function(b) {
+  ind  <- which(df_cvae$navire == navire_id[b])
+  ord1 <- sample(ind, 3e4, replace = TRUE)
+  ord2 <- sample(ind, 3e4, replace = TRUE)
+  keep <- which(ord1 != ord2)[1:2e4]
+  rowProds(bhattacharyya_1d(mu_cvae[ord1[keep], ], mu_cvae[ord2[keep], ],
+                            sig2_cvae[ord1[keep], ], sig2_cvae[ord2[keep], ]))
+})
+
+bc_seuil_navire <- tibble(navire = seq(33),
+                          lag  = colMeans(bclag_navire >= threshold, na.rm = TRUE),
+                          dist = colMeans(bc_navire >= threshold, na.rm = TRUE)) |>
+  left_join(Mat_navire, by = "navire")
+
+# Fleet level indices (all couples of vessels)
+set.seed(3)
+ord1 <- sample(nrow(df_cvae), 2e5, replace = TRUE)
+ord2 <- sample(nrow(df_cvae), 2e5, replace = TRUE)
+keep <- which(ord1 != ord2)[1:1e5]
+fleet <- tibble(
+  lag  = mean(bc_lag_cvae_ar > threshold, na.rm = TRUE),
+  dist = mean(rowProds(bhattacharyya_1d(mu_cvae[ord1[keep], ], mu_cvae[ord2[keep], ],
+                                        sig2_cvae[ord1[keep], ], sig2_cvae[ord2[keep], ])) > threshold))
+
+# Average of the individual indices, overall and per group (weighted by membership)
+mean_boat  <- summarise(bc_seuil_navire, lag = mean(lag), dist = mean(dist))
+mean_group <- bc_seuil_navire |>
+  pivot_longer(all_of(LETTERS[1:Q]), names_to = "Group", values_to = "Prop") |>
+  group_by(Group) |>
+  summarise(lag = weighted.mean(lag, Prop), dist = weighted.mean(dist, Prop))
+
+knitr::kable(bind_rows(Fleet = fleet, `Mean of vessels` = mean_boat, .id = "Level") |>
+               bind_rows(rename(mean_group, Level = Group)),
+             digits = 3, col.names = c("Level", "DSI", "GSI"))
+```
+
+## Figure 9 -- Individual stabilities {#sec-fig-bc-nav}
+
+*Original: `08_analyse_behaviour.R`; file `bc_group_colsbm_trim_cvae.png`.*
+Pies: proportions of group memberships of each vessel; squares: group averages;
+triangle: average of the vessels; diamond: fleet.
+
+```{r}
+#| label: fig-bc-nav
+#| fig-cap: "Proportions of trajectories with high overlap between their latent representations (BC >= 0.8) for the 33 fishing vessels: daily (DSI, x-axis) and global (GSI, y-axis) stability."
+#| fig-width: 12
+#| fig-height: 6
+ggplot(bc_seuil_navire) +
+  ggrepel::geom_text_repel(data = filter(bc_seuil_navire, !navire %in% boat),
+                           aes(x = lag, y = dist, col = navire, label = navire),
+                           show.legend = FALSE, size = 3.5, max.overlaps = 20,
+                           force = 5, force_pull = 5, box.padding = 1) +
+  scatterpie::geom_scatterpie(aes(x = lag, y = dist), data = bc_seuil_navire,
+                              cols = LETTERS[1:Q], pie_scale = 1, alpha = .9,
+                              color = "grey20", linewidth = .3, legend_name = "Group") +
+  ggrepel::geom_label_repel(data = filter(bc_seuil_navire, navire %in% boat),
+                            aes(x = lag, y = dist, label = navire),
+                            size = 5, col = "red", min.segment.length = 0.1,
+                            direction = "y", nudge_y = -0.03, nudge_x = .005,
+                            point.padding = 4, show.legend = FALSE) +
+  geom_point(data = mean_group, aes(x = lag, y = dist, fill = Group),
+             size = 6, shape = 22, stroke = 1.5, show.legend = FALSE) +
+  geom_point(data = mean_boat, aes(x = lag, y = dist), size = 6, shape = 17) +
+  geom_point(data = fleet, aes(x = lag, y = dist), size = 6, shape = 18) +
+  scale_fill_manual(values = group_colours) +
+  coord_equal(xlim = c(0.15, NA), ylim = c(0, 0.2)) +
+  labs(x = "DSI", y = "GSI")
+```
+
+## Figure 10 -- Mesoscale structure and group memberships {#sec-fig-block-colsbm}
+
+*Original: `08_analyse_behaviour.R`; file `iidcolsbm_group_trim.png`.* Left:
+common connectivity structure of the 20 quarterly proximity graphs (block
+widths are the group proportions). Right: proportion of the quarters each
+vessel spends in each group; vessels 2, 6 and 19 are framed in red.
+
+```{r}
+#| label: fig-block-colsbm
+#| fig-cap: "Left: common mesoscale structure of the collection (6 groups A to F). Right: proportions of group membership for each fishing vessel across the 20 quarterly proximity graphs."
+#| fig-width: 12
+#| fig-height: 6
+p_meso <- plot(iidcolsbm_trim, type = "graphon", ord = best_ord)
+breaks1 <- c(0, cumsum(iidcolsbm_trim$pi[[1]][best_ord])) # block boundaries
+breaks2 <- (breaks1[-1] + breaks1[-(Q + 1)]) / 2
+p_meso <- p_meso +
+  scale_y_continuous(breaks = breaks1, labels = round(breaks1, 2), transform = "reverse",
+                     sec.axis = sec_axis(transform = identity, breaks = breaks2,
+                                         labels = LETTERS[1:Q])) +
+  scale_x_continuous(breaks = breaks1, labels = round(breaks1, 2),
+                     sec.axis = sec_axis(transform = identity, breaks = breaks2,
+                                         labels = LETTERS[1:Q])) +
+  guides(fill = guide_colorsteps()) +
+  labs(x = NULL, y = NULL) +
+  theme_bw(base_size = 14) +
+  theme(axis.ticks = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+Mat_groups <- Mat_navire |>
+  pivot_longer(-navire, names_to = "Group", values_to = "Prop")
+frame <- tibble(y = boat)
+
+p_groups <- ggplot(Mat_groups, aes(x = Group, y = navire, alpha = Prop, fill = Group)) +
+  geom_tile() +
+  geom_hline(yintercept = seq(0, 33) + .5, linewidth = .1) +
+  geom_rect(data = frame, inherit.aes = FALSE,
+            aes(xmin = .5, xmax = Q + .5, ymin = y - .5, ymax = y + .5),
+            fill = NA, col = "red", linewidth = .8) +
+  scale_fill_manual(values = group_colours, guide = "none") +
+  scale_alpha_continuous(range = c(0, 1), guide = guide_bins(reverse = TRUE)) +
+  scale_y_continuous(breaks = boat) +
+  coord_fixed(ratio = 1 / 2, expand = FALSE) +
+  labs(y = "Vessel") +
+  theme_minimal(base_size = 14, base_line_size = 0)
+
+p_meso + p_groups + plot_layout(widths = c(3, 1.2))
+```
+
+## Figure 11 -- Trajectories, latent space and income per group {#sec-fig-group}
+
+*Original: `10_analyze_group.R`; files `latent_space_group.png` and
+`income_per_trip_noguide.png`.* Each trip is assigned the group of its vessel
+during the corresponding quarter.
+
+```{r}
+#| label: group-of-trips
+df_cvae_group <- df_cvae |>
+  mutate(quarteryear = quarter(time) + 4 * (year(time) - 2014),
+         b = match(navire, navire_id),
+         Group = factor(LETTERS[Z_trim[cbind(b, quarteryear)]], levels = LETTERS[1:Q]),
+         quarter = factor(quarter(time)))
+dplyr::count(df_cvae_group, Group)
+```
+
+### (a) Trajectories and latent space per group
+
+```{r}
+#| label: fig-traj-ls-group
+#| fig-cap: "Top: trajectories by colSBM group (all trajectories in grey). Bottom: distribution of (mu_1, mu_2) for the same trajectories."
+#| fig-width: 15
+#| fig-height: 6.5
+df_traj_group <- df_traj |>
+  select(maree, x, y) |>
+  inner_join(select(df_cvae_group, maree, Group), by = "maree") |>
+  filter(!is.na(Group))
+
+p_traj_group <- ggplot(df_traj_group, aes(x = x, y = y, col = Group, group = maree)) +
+  geom_path(data = select(df_traj_group, -Group), aes(x = x, y = y, group = maree),
+            inherit.aes = FALSE, col = "gray70", alpha = .5) +
+  geom_path(alpha = .1, show.legend = FALSE) +
+  scale_colour_manual(values = group_colours) +
+  facet_wrap(~ Group, nrow = 1) +
+  coord_quickmap() +
+  labs(x = NULL, y = NULL)
+
+p_lat_group <- df_cvae_group |>
+  filter(!is.na(Group)) |>
+  ggplot(aes(x = mu_1, y = mu_2, fill = Group)) +
+  stat_bin_2d(aes(alpha = after_stat(ndensity)), bins = 30, show.legend = FALSE) +
+  scale_fill_manual(values = group_colours) +
+  facet_wrap(~ Group, nrow = 1) +
+  coord_fixed(ylim = c(-2.5, 2.5)) +
+  labs(x = expression(mu[1]), y = expression(mu[2])) +
+  theme(strip.background = element_blank(), strip.text = element_blank())
+
+p_traj_group / p_lat_group
+```
+
+### (b) Income per trip
+
+Gross value per fishing trip (sum over the landed species; catch lines above
+10 000 € are removed as in the original script), summarised by quarter and
+group: black line = median, shades = $[\xi, 1-\xi]$ quantiles for
+$\xi \in \{.10, .25\}$, dotted lines = 1% and 99% quantiles.
+
+```{r}
+#| label: fig-income-group
+#| fig-cap: "Quantile distribution of the income (gross values) per fishing trip by quarter and by the group found with the colSBM model."
+#| fig-width: 13
+#| fig-height: 5.5
+income <- read_csv("./Rdata/sacrois_xgv_capt.csv", show_col_types = FALSE) |>
+  filter(MONTANT_EUROS_MOYENNE <= 10000) |>
+  rename(maree = MAREE_ID) |>
+  inner_join(select(df_cvae_group, maree, time, Group), by = "maree") |>
+  mutate(date = as_date(paste(year(time), 3 * quarter(time), "01", sep = "-"))) |>
+  group_by(maree, Group, date) |>
+  summarise(income = sum(MONTANT_EUROS_MOYENNE, na.rm = TRUE) / 1000, .groups = "drop")
+
+income |>
+  group_by(Group) |>
+  summarise(`mean income per trip (k€)` = mean(income), trips = n()) |>
+  knitr::kable(digits = 2)
+
+probs <- c(.01, .10, .25, .50, .75, .90, .99)
+income_q <- income |>
+  group_by(Group, date) |>
+  reframe(q = probs, value = quantile(income, probs)) |>
+  pivot_wider(names_from = q, values_from = value, names_prefix = "q")
+
+ggplot(income_q, aes(x = date, col = Group, fill = Group)) +
+  geom_ribbon(aes(ymin = q0.1, ymax = q0.9), alpha = .3) +
+  geom_ribbon(aes(ymin = q0.25, ymax = q0.75), alpha = .3) +
+  geom_line(aes(y = q0.01), linetype = 3) +
+  geom_line(aes(y = q0.99), linetype = 3) +
+  geom_line(aes(y = q0.5), linewidth = 1.5) +
+  geom_line(aes(y = q0.5), col = "black") +
+  scale_colour_manual(values = group_colours, aesthetics = c("colour", "fill")) +
+  facet_wrap(~ Group, nrow = 1) +
+  coord_cartesian(ylim = c(0, 5)) +
+  labs(x = "Date", y = "Income per trip (kEuros)") +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+# Appendix figures
+
+## Figure A1 -- Reconstruction of trajectories {#sec-fig-rec}
+
+*Original: `py_workflow/cvae_analysis.ipynb`; file `cvae_trajrec_nz3_48.png`.*
+48 random real trajectories (red) and their reconstruction
+$G(\hat\mu_m, c_m; \hat\theta)$ by the CVAE with $d_z = 3$ (blue). This is the
+only figure that needs the trained network: run first, from `py_workflow/`
+(requires `torch`, `pandas`, `numpy`)
+
+```bash
+python export_reconstruction.py --nz 3 --n 48
+```
+
+which writes `R/pydata/reconstruction_cvae3.csv`.
+
+```{r}
+#| label: fig-rec
+#| fig-cap: "Sample of 48 real trajectories (red) drawn uniformly at random and their reconstruction (blue) by the CVAE with 3 latent dimensions."
+#| fig-width: 12
+#| fig-height: 8
+rec_file <- "./pydata/reconstruction_cvae3.csv"
+if (file.exists(rec_file)) {
+  read_csv(rec_file, show_col_types = FALSE) |>
+    ggplot(aes(x = x, y = y, col = type, group = type)) +
+    annotate("point", x = 0, y = 0, size = 1) +
+    geom_path(alpha = .6) +
+    geom_point(aes(alpha = h), size = .5, show.legend = FALSE) +
+    scale_alpha(range = c(.6, .1)) +
+    scale_colour_manual(NULL, values = c(real = "red", reconstructed = "blue")) +
+    facet_wrap(~ id, nrow = 6) +
+    coord_cartesian(xlim = c(-7, 5), ylim = c(-5, 2)) +
+    theme_void() +
+    theme(strip.text = element_blank(), legend.position = "bottom",
+          panel.border = element_rect(fill = NA, colour = "grey60"))
+} else {
+  message("Run py_workflow/export_reconstruction.py first to produce ", rec_file)
+}
+```
+
+## Figure A2 -- Quarterly proximity graphs {#sec-fig-proxy-graph}
+
+*Original: `08_analyse_behaviour.R`; file `proxy_graph_trim.png`.* Adjacency
+matrices of the 20 quarterly proximity graphs (rows: quarters, columns: years).
+Vessels not active during a quarter are `NA` (pink).
+
+```{r}
+#| label: fig-proxy-graph
+#| fig-cap: "Adjacency matrices of the 20 quarterly proximity graphs between fishing vessels. Proximity between vessels is printed in black and NA value in pink."
+#| fig-width: 10
+#| fig-height: 8.5
+trim_matrices <- lapply(seq(20), function(l) {
+  A <- matrix(NA, 33, 33)
+  A[trim_peche[[l]], trim_peche[[l]]] <- iidcolsbm_trim$A[[l]]
+  A[A == -1] <- NA
+  diag(A) <- NA
+  A
+})
+
+array(unlist(trim_matrices), dim = c(33, 33, 20)) |>
+  reshape2::melt() |>
+  mutate(Quarter = (Var3 - 1) %% 4 + 1,
+         Year = 2014 + (Var3 - 1) %/% 4) |>
+  ggplot(aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(show.legend = FALSE) +
+  scale_y_reverse() +
+  scale_fill_gradient(low = "white", high = "black", limits = c(0, 1), na.value = "lightpink1") +
+  geom_hline(yintercept = seq(0, 33) + .5, linewidth = .1, color = "grey20") +
+  geom_vline(xintercept = seq(0, 33) + .5, linewidth = .1, color = "grey20") +
+  coord_fixed(expand = FALSE) +
+  facet_grid(Quarter ~ Year) +
+  labs(x = NULL, y = NULL) +
+  theme(axis.text = element_blank(), axis.ticks = element_blank())
+```
+
+## Figure A3 -- Bootstrap {#sec-fig-bootstrap}
+
+*Original: `07c_fit_colsbm_proxy_graphs_resampling.R`; file
+`bootstrap_results.png`.* colSBM fitted on 30 collections of networks built
+from 90% of the days of each quarter. Top: mesoscale structure of two
+bootstrap samples ($m = 29$ with $\hat R = 6$ and $m = 23$ with $\hat R = 7$,
+as in the paper), with groups aligned on the full-data fit by minimising the
+$L_2$ distance between graphons. Bottom: ARI between the bootstrap and the
+full-data clusterings, for each sample and each quarter.
+
+```{r}
+#| label: bootstrap
+N_sub <- 30
+boot_fits <- lapply(seq(N_sub), function(k) readRDS(sprintf(
+  "./Rdata/save_colsbmfit_subsample/res_iidcolsbm_subnets_90/iidcolsbm_trim_sub_net_%d.rds", k))$best_fit)
+
+R_hat <- sapply(boot_fits, \(f) f$nb_clusters)
+round(100 * prop.table(table(R_hat)))
+
+Z_full <- get_Ztrim(iidcolsbm_trim)
+ARI <- sapply(boot_fits, function(f) {
+  Z_k <- get_Ztrim(f)
+  sapply(1:20, function(t) {
+    keep <- !is.na(Z_k[, t]) & !is.na(Z_full[, t])
+    mclust::adjustedRandIndex(Z_full[keep, t], Z_k[keep, t])
+  })
+})
+summary(c(ARI))
+```
+
+```{r}
+#| label: fig-bootstrap
+#| fig-cap: "Top: estimated mesoscale structures obtained from two bootstrap samples, with R = 6 (left) and R = 7 (right). Bottom: histogram of the adjusted Rand index (ARI) between bootstrap and full-data clusterings."
+#| fig-width: 9
+#| fig-height: 8
+plot_boot <- function(m) {
+  f <- boot_fits[[m]]
+  o <- get_order_withref(f, iidcolsbm_trim, best_ord)
+  plot(f, type = "graphon", ord = o) +
+    ggtitle(bquote(m == .(m) ~ "," ~ hat(R) == .(f$nb_clusters))) +
+    theme(legend.position = "none", plot.title = element_text(size = 12))
+}
+
+p_hist_ARI <- ggplot(tibble(ARI = c(ARI)), aes(x = ARI)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), binwidth = 0.03,
+                 fill = "#4C72B0", color = "white") +
+  geom_vline(xintercept = mean(ARI, na.rm = TRUE), color = "#DD8452", linewidth = 1.1) +
+  annotate("text", x = mean(ARI, na.rm = TRUE) - 0.15, y = Inf, vjust = 2,
+           label = "Mean of the ARI", color = "#DD8452") +
+  scale_x_continuous(limits = c(0, 1)) +
+  ylab("Frequency") +
+  theme_minimal()
+
+(plot_boot(29) + plot_boot(23)) /
+  (plot_spacer() + p_hist_ARI + plot_spacer() + plot_layout(widths = c(1, 2, 1)))
+```
+
+# From raw data to the inputs of this vignette {#sec-pipeline}
+
+The intermediate files read above are produced by the following steps
+(raw SACROIS / SIH-GEOLOC data are confidential and not in the repository).
+
+| Step | Script | Output |
+|---|---|---|
+| Extract and align hourly trajectories | `01_extract_xgv.R`, `02_merge_xgv.R` | `Rdata/xgv_100_14-18.csv` |
+| Train the VAE / CVAE ($d_z = 2..5$) | `py_workflow/train_traj_vae.py` | `py_workflow/save/*.pth`, `monitor_*.csv` |
+| Export latent representations, generate grid trajectories | `py_workflow/cvae_analysis.ipynb` | `pydata/latentspace_*.csv`, `generated_traj_cvae3.csv` |
+| Order the dimensions | `03_computing_bc.R` | `Rdata/xgv_{cvae_3,vae_4}_reordered_filtered.csv` |
+| BC between vessels, same / adjacent days | `06_build_proximity_graph.R` | `Rdata/bc_jour_cvae.rds`, `bc_lag_cvae.rds`, `ldates.rds` |
+| Quarterly graphs and colSBM fit | `07_fit_colsbm_proxy_graphs.R`, `07b_...R` | `Rdata/trim_peche.rds`, `Rdata/save_sbmfit/iidcolsbm_trim_round8.rds` |
+| Bootstrap of the colSBM | `07c_fit_colsbm_proxy_graphs_resampling.R` | `Rdata/save_colsbmfit_subsample/` |
+| Catch data of the trips | `09_extract_xgv_capture.R` | `Rdata/sacrois_xgv_capt.csv` |
+| Reconstructions for Figure A1 | `py_workflow/export_reconstruction.py` | `pydata/reconstruction_cvae3.csv` |
+
+# Session information {-}
+
+```{r}
+#| label: session
+#| code-fold: true
+sessionInfo()
+```

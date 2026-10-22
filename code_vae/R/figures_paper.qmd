@@ -727,7 +727,7 @@ array(unlist(trim_matrices), dim = c(33, 33, 20)) |>
 ## Figure A3 -- Bootstrap {#sec-fig-bootstrap}
 
 *Original: `07c_fit_colsbm_proxy_graphs_resampling.R`; file
-`bootstrap_results.png`.* colSBM fitted on 30 collections of networks built
+`images2/bootstrap_results_90.png`.* colSBM fitted on 30 collections of networks built
 from 90% of the days of each quarter (fits saved in
 `Rdata/save_colsbm_bootstrap/fits_90/`). Top: mesoscale structure of one
 bootstrap sample per value of $\hat R$, with groups aligned on the full-data
@@ -750,9 +750,8 @@ boot_fits <- lapply(seq(N_sub), function(k) readRDS(sprintf(
 
 R_hat <- sapply(boot_fits, \(f) f$nb_clusters)
 round(100 * prop.table(table(R_hat)))
-# first replicate for each value of R_hat, most frequent value first
-R_freq <- sort(table(R_hat), decreasing = TRUE)
-m_show <- sapply(as.integer(names(R_freq)), function(r) which(R_hat == r)[1])
+# replicates shown in the paper: one with R_hat = 6, one with R_hat = 5
+m_show <- c(3, 4)
 
 Z_full <- get_Ztrim(iidcolsbm_trim)
 ARI <- sapply(boot_fits, function(f) {
@@ -779,12 +778,14 @@ plot_boot <- function(m) {
 }
 
 p_hist_ARI <- ggplot(tibble(ARI = c(ARI)), aes(x = ARI)) +
+  # boundary = 1: the last bin ends at 1, so that ARI = 1 is not dropped
   geom_histogram(aes(y = after_stat(count / sum(count))), binwidth = 0.03,
-                 fill = "#4C72B0", color = "white") +
+                 boundary = 1, fill = "#4C72B0", color = "white") +
   geom_vline(xintercept = mean(ARI, na.rm = TRUE), color = "#DD8452", linewidth = 1.1) +
-  annotate("text", x = mean(ARI, na.rm = TRUE) - 0.15, y = Inf, vjust = 2,
-           label = "Mean of the ARI", color = "#DD8452") +
-  scale_x_continuous(limits = c(0, 1)) +
+  annotate("text", x = mean(ARI, na.rm = TRUE) - 0.02, y = Inf, hjust = 1,
+           vjust = 2, label = "Mean of the ARI", color = "#DD8452") +
+  coord_cartesian(xlim = c(0, 1)) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) + # room for the label
   ylab("Frequency") +
   theme_minimal()
 

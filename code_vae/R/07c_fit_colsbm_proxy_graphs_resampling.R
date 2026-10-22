@@ -222,6 +222,7 @@ plot_boot <- function(m) {
 R_freq <- sort(table(R_hat), decreasing = TRUE)
 m_show <- sapply(as.integer(names(R_freq)), function(r) which(R_hat == r)[1])
 
+m_show=c(3,4)
 
 #------------- ARI between bootstrap and full-data clusterings
 # For replicate k and quarter t, the ARI is computed on the vessels present
@@ -238,13 +239,15 @@ ARI <- sapply(boot_fits, function(f) {
 summary(c(ARI))
 
 p_hist_ARI <- ggplot(tibble(ARI = c(ARI)), aes(x = ARI)) +
+  # boundary = 1: the last bin ends at 1, so that ARI = 1 is not dropped
   geom_histogram(aes(y = after_stat(count / sum(count))), binwidth = 0.03,
-                 fill = "#4C72B0", color = "white") +
+                 boundary = 1, fill = "#4C72B0", color = "white") +
   geom_vline(xintercept = mean(ARI, na.rm = TRUE), color = "#DD8452",
              linewidth = 1.1) +
-  annotate("text", x = mean(ARI, na.rm = TRUE) - 0.15, y = Inf, vjust = 2,
-           label = "Mean of the ARI", color = "#DD8452") +
-  scale_x_continuous(limits = c(0, 1)) +
+  annotate("text", x = mean(ARI, na.rm = TRUE) - 0.02, y = Inf, hjust = 1,
+           vjust = 2, label = "Mean of the ARI", color = "#DD8452") +
+  coord_cartesian(xlim = c(0, 1)) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) + # room for the label
   ylab("Frequency") +
   theme_minimal()
 
@@ -254,5 +257,5 @@ p_struct <- lapply(m_show, plot_boot)
 final_plot <- wrap_plots(p_struct, nrow = 1) /
   (plot_spacer() + p_hist_ARI + plot_spacer() + plot_layout(widths = c(1, 2, 1)))
 final_plot
-# ggsave(file.path(dir_boot, paste0("bootstrap_results_", 100 * frac, ".png")),
-#        final_plot, width = 9, height = 8)
+ggsave(paste0("./images2/bootstrap_results_", 100 * frac, ".png"),
+       final_plot, width = 9, height = 8, dpi = 300)
